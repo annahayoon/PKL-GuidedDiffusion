@@ -1,0 +1,4 @@
+# Physics / forward model configuration
+psf_path: null
+background: 0.0
+

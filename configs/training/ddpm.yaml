@@ -1,0 +1,16 @@
+# Training hyperparameters for DDPM
+batch_size: 2
+num_workers: 0
+max_epochs: 1
+num_gpus: 1
+gradient_clip: 1.0
+accumulate_grad_batches: 1
+val_check_interval: 1.0
+early_stopping_patience: 2
+learning_rate: 1.0e-4
+weight_decay: 1.0e-6
+use_scheduler: false
+num_timesteps: 1000
+beta_schedule: cosine
+use_ema: true
+

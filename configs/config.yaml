@@ -1,0 +1,29 @@
+defaults:
+  - model: unet
+  - data: synthesis
+  - physics: microscopy
+  - guidance: pkl
+  - inference: default
+  - training: ddpm
+  - override hydra/launcher: basic
+  - _self_
+
+experiment:
+  name: ${now:%Y-%m-%d_%H-%M-%S}
+  seed: 42
+  device: cuda
+  mixed_precision: true
+
+paths:
+  root: ${oc.env:PROJECT_ROOT,.}
+  data: ${paths.root}/data
+  checkpoints: ${paths.root}/checkpoints
+  outputs: ${paths.root}/outputs
+  logs: ${paths.root}/logs
+
+wandb:
+  project: pkl-diffusion
+  entity: null
+  mode: online
+
+

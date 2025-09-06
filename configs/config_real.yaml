@@ -1,0 +1,44 @@
+defaults:
+  - model: unet
+  - data: real_pairs
+  - physics: microscopy
+  - guidance: pkl
+  - inference: default
+  - training: ddpm
+  - override hydra/launcher: basic
+  - _self_
+
+experiment:
+  name: real_microscopy_${now:%Y-%m-%d_%H-%M-%S}
+  seed: 42
+  device: cuda
+  mixed_precision: true
+
+paths:
+  root: ${oc.env:PROJECT_ROOT,.}
+  data: ${paths.root}/data
+  checkpoints: ${paths.root}/checkpoints
+  outputs: ${paths.root}/outputs
+  logs: ${paths.root}/logs
+
+wandb:
+  project: pkl-diffusion-real
+  entity: null
+  mode: online
+
+# Override training settings for real data
+training:
+  batch_size: 4
+  num_workers: 2
+  max_epochs: 100
+  gradient_clip: 1.0
+  learning_rate: 1.0e-4
+  num_timesteps: 1000
+  beta_schedule: cosine
+  use_ema: true
+
+# Override data settings
+data:
+  image_size: 256
+  min_intensity: 0
+  max_intensity: 255

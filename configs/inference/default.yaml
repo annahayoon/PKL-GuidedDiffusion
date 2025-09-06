@@ -1,0 +1,7 @@
+# Inference defaults
+checkpoint_path: ${paths.checkpoints}/final_model.pt
+input_dir: ${paths.data}/val
+output_dir: ${paths.outputs}/inference
+ddim_steps: 10
+eta: 0.0
+
