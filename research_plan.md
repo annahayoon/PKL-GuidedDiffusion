@@ -1,7 +1,7 @@
 # PKL-Guided Diffusion Research Plan for ICLR 2025
 
 **Deadline: September 24th, 2025**  
-**Current Date: December 2024**  
+**Current Date: September 6th, 2025 (18 days to deadline)**  
 **Status: MAJOR PROGRESS - REAL DATA PIPELINE & BASELINES IMPLEMENTED**
 
 ## Executive Summary
@@ -14,7 +14,7 @@
 - ✅ Richardson-Lucy and RCAN baseline implementations complete
 - ✅ Comprehensive training scripts for both synthetic and real data
 - ✅ Full evaluation pipeline with multiple metrics (PSNR, SSIM, FRC, SAR, Hausdorff)
-- ✅ End-to-end testing suite with 783 lines of comprehensive tests
+- ✅ End-to-end testing suite with 784 lines of comprehensive tests
 - ✅ Substantial paper manuscript progress (LaTeX implementation with methodology, results sections)
 
 **Current Advantages:**
@@ -86,7 +86,7 @@
 **Phase 7: CURRENT PRIORITIES (Ready for Execution)**
 - [ ] **Large-scale experimental validation** - Run comprehensive PKL vs baseline comparisons
 - [ ] **Statistical significance testing** - Generate robust quantitative results
-- [ ] **Real data experiments** - Process actual WF/2P microscopy data and train models
+- [ ] **Real data experiments** - Train and evaluate on processed WF/2P data
 - [ ] **Results generation** - Create all figures, tables, and quantitative comparisons
 
 **Phase 8: FINAL PAPER COMPLETION (Target: Near-term completion)**
@@ -100,10 +100,11 @@
 
 ### Immediate Next Steps (High Priority)
 1. **Execute Real Data Experiments**
-   - Use `scripts/process_real_data.py` to prepare WF/2P datasets
+   - WF/2P datasets already processed and split on disk; see `REAL_DATA_PROCESSING_SUMMARY.md` and `data/real_microscopy/{real_pairs,splits}` (9,499 pairs; 7,599/949/951)
    - Run `scripts/train_real_data.py` for model training
    - Use `scripts/inference.py` and `scripts/evaluate.py` for assessment
-   - Create frame-based splits with `scripts/create_frame_based_splits.py` (ensures per-frame grouping, avoids leakage)
+   - To regenerate, use `scripts/process_real_data.py` and `scripts/create_frame_based_splits.py`
+   - For orchestrating large experiment sweeps, use `scripts/run_all_experiments_tmux.sh` to launch parallel tmux sessions on the server
 
 2. **Generate Comprehensive Results**
    - PKL vs L2 vs Anscombe guidance comparisons
