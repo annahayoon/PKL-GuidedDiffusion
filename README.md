@@ -6,6 +6,22 @@ PKL-Guided Diffusion for Microscopy Denoising.
 This repository follows a phased implementation plan. Phase 1 sets up the
 project structure, environment, and configuration system.
 
+Data policy
+-----------
+
+- Data, logs, weights, and large artifacts are intentionally excluded from version control via `.gitignore`.
+- Use the scripts in `scripts/` to download or generate datasets locally under `data/`.
+- Example real-microscopy processing (outputs to `data/real_microscopy/`):
+
+```
+python3 scripts/process_real_data.py \
+  --wf-path /abs/path/to/wf.tif \
+  --tp-path /abs/path/to/tp_reg.tif \
+  --beads-dir /abs/path/to/beads \
+  --output-dir /home/jilab/anna_OS_ML/PKL-DiffusionDenoising/data/real_microscopy \
+  --create-splits
+```
+
 Quick start
 -----------
 
