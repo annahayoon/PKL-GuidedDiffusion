@@ -37,6 +37,7 @@
   - ✅ **Real microscopy data processing pipeline (WF/2P pairs)**
   - ✅ **RealPairsDataset implementation for training on real data**
   - ✅ **Bead calibration data processing**
+  - ✅ **Frame-based train/val/test splits** (keep all patches from the same frame together); utility: `scripts/create_frame_based_splits.py`
 - **DDIM Sampler**: Complete implementation with numerical stability and comprehensive testing
 - **Baseline Methods**:
   - ✅ **Richardson-Lucy deconvolution (complete implementation)**
@@ -102,6 +103,7 @@
    - Use `scripts/process_real_data.py` to prepare WF/2P datasets
    - Run `scripts/train_real_data.py` for model training
    - Use `scripts/inference.py` and `scripts/evaluate.py` for assessment
+   - Create frame-based splits with `scripts/create_frame_based_splits.py` (ensures per-frame grouping, avoids leakage)
 
 2. **Generate Comprehensive Results**
    - PKL vs L2 vs Anscombe guidance comparisons

@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument("--min-intensity", type=float, default=0)
     parser.add_argument("--max-intensity", type=float, default=1000)
     parser.add_argument("--mode", type=str, default="train", choices=["train", "val", "test"])
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="Computation device")
     return parser.parse_args()
 
 
@@ -32,8 +33,18 @@ def main():
     out_y.mkdir(parents=True, exist_ok=True)
 
     # Minimal PSF and forward model
+    if args.device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
+
     psf = PSF()
-    forward_model = ForwardModel(psf=psf.to_torch(device="cpu"), background=0.0, device="cpu")
+    forward_model = ForwardModel(
+        psf=psf.to_torch(device=device),
+        background=0.0,
+        device=device,
+        common_sizes=[(int(args.image_size), int(args.image_size))],
+    )
 
     transform = IntensityToModel(minIntensity=args.min_intensity, maxIntensity=args.max_intensity)
 
