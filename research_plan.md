@@ -33,7 +33,7 @@
 - **Guidance Mechanisms**: PKL, L2, and Anscombe guidance with adaptive scheduling
 - **Diffusion Models**: UNet architecture + DDPM trainer with EMA support
 - **Data Pipeline**: 
-  - ✅ Synthetic data synthesis from ImageNet/BioTISR
+  - ✅ Synthetic data synthesis from ImageNet-like sources
   - ✅ **Real microscopy data processing pipeline (WF/2P pairs)**
   - ✅ **RealPairsDataset implementation for training on real data**
   - ✅ **Bead calibration data processing**

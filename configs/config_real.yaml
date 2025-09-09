@@ -36,6 +36,8 @@ training:
   num_timesteps: 1000
   beta_schedule: cosine
   use_ema: true
+  supervised_x0_weight: 0.2
+  use_conditioning: true
 
 # Override data settings
 data:

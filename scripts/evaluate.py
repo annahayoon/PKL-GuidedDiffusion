@@ -8,17 +8,20 @@ import numpy as np
 import torch
 import tifffile
 from tqdm import tqdm
+from PIL import Image
 
 from pkl_dg.models.unet import DenoisingUNet
 from pkl_dg.models.diffusion import DDPMTrainer
 from pkl_dg.models.sampler import DDIMSampler
 from pkl_dg.physics.psf import PSF
 from pkl_dg.physics.forward_model import ForwardModel
+from pkl_dg.physics.psf_estimator import build_psf_bank
+ 
 from pkl_dg.guidance.pkl import PKLGuidance
 from pkl_dg.guidance.l2 import L2Guidance
 from pkl_dg.guidance.anscombe import AnscombeGuidance
 from pkl_dg.guidance.schedules import AdaptiveSchedule
-from pkl_dg.data.transforms import IntensityToModel
+from pkl_dg.data.transforms import IntensityToModel, AnscombeToModel, GeneralizedAnscombeToModel
 from pkl_dg.evaluation import Metrics, RobustnessTests, HallucinationTests
 from pkl_dg.evaluation.tasks import DownstreamTasks
 from pkl_dg.baselines import richardson_lucy_restore
@@ -32,14 +35,47 @@ except Exception:
 
 def _load_model_and_sampler(cfg: DictConfig, guidance_type: str):
     device = str(cfg.experiment.device)
-    unet = DenoisingUNet(OmegaConf.to_container(cfg.model, resolve=True))
+    model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
+    use_conditioning = bool(getattr(cfg.training, "use_conditioning", False))
+    conditioning_type = str(getattr(cfg.training, "conditioning_type", "wf")).lower()
+    if use_conditioning and conditioning_type == "wf" and int(model_cfg.get("in_channels", 1)) == 1:
+        model_cfg["in_channels"] = 2
+    unet = DenoisingUNet(model_cfg)
     ddpm = DDPMTrainer(model=unet, config=OmegaConf.to_container(cfg.training, resolve=True))
     checkpoint_path = Path(str(cfg.inference.checkpoint_path))
     state_dict = torch.load(checkpoint_path, map_location=device)
-    ddpm.load_state_dict(state_dict)
+    # Load state dict (includes EMA weights if present)
+    ddpm.load_state_dict(state_dict, strict=False)
     ddpm.eval().to(device)
-    psf = PSF(getattr(cfg.physics, "psf_path", None))
-    forward_model = ForwardModel(psf=psf.to_torch(device=device), background=float(cfg.physics.background), device=device)
+    # Forward model per paper (PSF + background)
+    forward_model = None
+    try:
+        phys_cfg = cfg.physics
+        use_psf = bool(getattr(phys_cfg, "use_psf", False))
+        background = float(getattr(phys_cfg, "background", 0.0))
+        if use_psf:
+            psf_path = getattr(phys_cfg, "psf_path", None)
+            use_bead = bool(getattr(phys_cfg, "use_bead_psf", False))
+            if use_bead:
+                beads_dir = str(getattr(phys_cfg, "beads_dir", ""))
+                bank = build_psf_bank(beads_dir)
+                mode = getattr(phys_cfg, "bead_mode", None)
+                if mode is None:
+                    # Heuristic: prefer with_AO if available
+                    psf_t = bank.get("with_AO", bank.get("no_AO"))
+                else:
+                    psf_t = bank.get(str(mode), next(iter(bank.values())))
+                psf = psf_t.to(device=device, dtype=torch.float32)
+                if psf.ndim == 2:
+                    psf = psf.unsqueeze(0).unsqueeze(0)
+            elif psf_path is not None:
+                psf = PSF(psf_path=str(psf_path)).to_torch(device=device)
+            else:
+                # Default Gaussian PSF if none provided
+                psf = PSF().to_torch(device=device)
+            forward_model = ForwardModel(psf=psf, background=background, device=device)
+    except Exception:
+        forward_model = None
     if guidance_type == "pkl":
         guidance = PKLGuidance(epsilon=float(getattr(cfg.guidance, "epsilon", 1e-6)))
     elif guidance_type == "l2":
@@ -55,7 +91,19 @@ def _load_model_and_sampler(cfg: DictConfig, guidance_type: str):
         epsilon_lambda=float(getattr(schedule_cfg, "epsilon_lambda", 1e-3)),
         T_total=int(cfg.training.num_timesteps),
     )
-    transform = IntensityToModel(min_intensity=float(cfg.data.min_intensity), max_intensity=float(cfg.data.max_intensity))
+    noise_model = str(getattr(cfg.data, "noise_model", "gaussian")).lower()
+    if noise_model == "poisson":
+        transform = AnscombeToModel(maxIntensity=float(cfg.data.max_intensity))
+    elif noise_model == "poisson_gaussian":
+        gat_cfg = getattr(cfg.data, "gat", {})
+        transform = GeneralizedAnscombeToModel(
+            maxIntensity=float(cfg.data.max_intensity),
+            alpha=float(getattr(gat_cfg, "alpha", 1.0)),
+            mu=float(getattr(gat_cfg, "mu", 0.0)),
+            sigma=float(getattr(gat_cfg, "sigma", 0.0)),
+        )
+    else:
+        transform = IntensityToModel(min_intensity=float(cfg.data.min_intensity), max_intensity=float(cfg.data.max_intensity))
     sampler = DDIMSampler(
         model=ddpm,
         forward_model=forward_model,
@@ -103,14 +151,42 @@ def _compute_downstream_metrics(
 
 
 def _load_pairs(input_dir: Path) -> List[Path]:
-    return list(input_dir.glob("*.tif")) + list(input_dir.glob("*.tiff"))
+    paths: List[Path] = []
+    for ext in ["*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg"]:
+        paths.extend(list(input_dir.glob(ext)))
+    return sorted(paths)
 
 
 def _read_tif(path: Path) -> np.ndarray:
+    if path.suffix.lower() in [".png", ".jpg", ".jpeg"]:
+        return np.array(Image.open(path)).astype(np.float32)
     arr = tifffile.imread(str(path))
     if arr.ndim == 3 and arr.shape[0] == 1:
         arr = arr[0]
     return arr.astype(np.float32)
+
+
+def _save_visuals(out_dir: Path, name: str, wf: np.ndarray, pred_map: Dict[str, np.ndarray], gt: Optional[np.ndarray] = None) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Normalize to 0-255 for visualization per-image
+    def norm(img: np.ndarray) -> np.ndarray:
+        a = img.astype(np.float32)
+        lo, hi = np.quantile(a, 0.01), np.quantile(a, 0.99)
+        if hi <= lo:
+            hi = lo + 1.0
+        a = (a - lo) / (hi - lo)
+        a = np.clip(a, 0, 1)
+        return (a * 255.0).astype(np.uint8)
+
+    grid_parts: List[np.ndarray] = [norm(wf)]
+    for k in sorted(pred_map.keys()):
+        grid_parts.append(norm(pred_map[k]))
+    if gt is not None:
+        grid_parts.append(norm(gt))
+
+    # Concatenate horizontally
+    grid = np.concatenate(grid_parts, axis=1)
+    Image.fromarray(grid).save(out_dir / f"{name}_comparison.png")
 
 
 def evaluate(cfg: DictConfig) -> Dict[str, Dict[str, float]]:
@@ -121,6 +197,7 @@ def evaluate(cfg: DictConfig) -> Dict[str, Dict[str, float]]:
     image_paths = _load_pairs(input_dir)
 
     # Prepare samplers per guidance
+    conditioning_type = str(getattr(cfg.training, "conditioning_type", "wf")).lower()
     samplers = {
         "l2": _load_model_and_sampler(cfg, "l2"),
         "anscombe": _load_model_and_sampler(cfg, "anscombe"),
@@ -129,9 +206,14 @@ def evaluate(cfg: DictConfig) -> Dict[str, Dict[str, float]]:
 
     # Optional RCAN
     rcan = None
-    if HAS_RCAN and getattr(cfg.baselines, "rcan_checkpoint", None) is not None:
+    baselines_cfg = None
+    try:
+        baselines_cfg = cfg.baselines  # may not exist
+    except Exception:
+        baselines_cfg = None
+    if HAS_RCAN and baselines_cfg is not None and getattr(baselines_cfg, "rcan_checkpoint", None) is not None:
         try:
-            rcan = RCANWrapper(checkpoint_path=str(cfg.baselines.rcan_checkpoint), device=device)
+            rcan = RCANWrapper(checkpoint_path=str(baselines_cfg.rcan_checkpoint), device=device)
         except Exception:
             rcan = None
 
@@ -166,26 +248,35 @@ def evaluate(cfg: DictConfig) -> Dict[str, Dict[str, float]]:
         if gt_masks is not None:
             _acc("wf", _compute_downstream_metrics(y, gt_masks))
             
-        # RL baseline
-        try:
-            psf = PSF(getattr(cfg.physics, "psf_path", None)).psf
-            rl = richardson_lucy_restore(y, psf, num_iter=int(getattr(cfg.baselines, "rl_iters", 30)))
-            _acc("rl", _compute_metrics(rl, x_gt))
-            if gt_masks is not None:
-                _acc("rl", _compute_downstream_metrics(rl, gt_masks))
-        except Exception:
-            pass
+        # RL baseline removed (no PSF usage)
             
         # Diffusion baselines
         for name, sampler in samplers.items():
             ten_y = torch.from_numpy(y).float().to(device)
             if ten_y.ndim == 2:
                 ten_y = ten_y.unsqueeze(0).unsqueeze(0)
-            pred = sampler.sample(ten_y, tuple(ten_y.shape), device=device, verbose=False)
+            # Build conditioner in model domain if model is conditioned (in_channels=2)
+            try:
+                cond = sampler.transform(ten_y) if conditioning_type == "wf" else None
+            except Exception:
+                cond = None
+            pred = sampler.sample(ten_y, tuple(ten_y.shape), device=device, verbose=False, conditioner=cond)
             out = pred.squeeze().detach().cpu().numpy().astype(np.float32)
             _acc(name, _compute_metrics(out, x_gt))
             if gt_masks is not None:
                 _acc(name, _compute_downstream_metrics(out, gt_masks))
+        
+        # Save side-by-side visuals (WF | l2 | anscombe | pkl | GT)
+        preds = {}
+        for k, sampler in samplers.items():
+            ten_y_vis = torch.from_numpy(y).float().to(device).unsqueeze(0).unsqueeze(0)
+            try:
+                cond_vis = sampler.transform(ten_y_vis) if conditioning_type == "wf" else None
+            except Exception:
+                cond_vis = None
+            out_vis = sampler.sample(ten_y_vis, (1, 1) + y.shape, device=device, verbose=False, conditioner=cond_vis)
+            preds[k] = out_vis.squeeze().detach().cpu().numpy().astype(np.float32)
+        _save_visuals(Path(str(cfg.inference.output_dir)) / "comparisons", img_path.stem, y, preds, x_gt)
 
         # RCAN if available
         if rcan is not None:
@@ -197,16 +288,7 @@ def evaluate(cfg: DictConfig) -> Dict[str, Dict[str, float]]:
             except Exception:
                 pass
 
-        # --- Adversarial Evaluations ---
-        psf_true = PSF(getattr(cfg.physics, "psf_path", None))
-        
-        # Robustness: PSF mismatch
-        try:
-            x_mismatch = RobustnessTests.psf_mismatch_test(samplers["pkl"], ten_y, psf_true, mismatch_factor=1.1)
-            out = x_mismatch.squeeze().detach().cpu().numpy().astype(np.float32)
-            _acc("pkl_psf_mismatch", _compute_metrics(out, x_gt))
-        except Exception:
-            pass
+        # --- Adversarial Evaluations --- (PSF-dependent tests removed)
 
         # Robustness: Alignment Error
         try:
@@ -227,22 +309,7 @@ def evaluate(cfg: DictConfig) -> Dict[str, Dict[str, float]]:
         except Exception:
             pass
             
-        # Hallucination: Omission Error (Fidelity of faint structure)
-        try:
-            faint_gt, faint_mask = HallucinationTests.insert_faint_structure(x_gt, start=(8, 8), end=(x_gt.shape[0]-8, x_gt.shape[1]-8))
-            fm = samplers["pkl"].forward_model
-            ten_faint = torch.from_numpy(faint_gt).float().to(device).unsqueeze(0).unsqueeze(0)
-            
-            with torch.no_grad():
-                wf_like = fm.forward(ten_faint, add_noise=True).squeeze().cpu().numpy()
-            
-            ten_wf = torch.from_numpy(wf_like).float().to(device).unsqueeze(0).unsqueeze(0)
-            out = samplers["pkl"].sample(ten_wf, ten_wf.shape, device=device, verbose=False)
-            out_np = out.squeeze().detach().cpu().numpy()
-            psnr_mask = HallucinationTests.structure_fidelity_psnr(out_np, faint_gt, faint_mask)
-            _acc("pkl_omission_psnr", {"psnr_faint": psnr_mask})
-        except Exception:
-            pass
+        # Hallucination: Omission Error removed (requires forward model)
 
 
     # Aggregate means

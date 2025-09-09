@@ -1,7 +1,7 @@
 # Training hyperparameters for DDPM
-batch_size: 2
-num_workers: 0
-max_epochs: 1
+batch_size: 4
+num_workers: 4
+max_epochs: 5000
 num_gpus: 1
 gradient_clip: 1.0
 accumulate_grad_batches: 1
@@ -13,4 +13,15 @@ use_scheduler: false
 num_timesteps: 1000
 beta_schedule: cosine
 use_ema: true
+supervised_x0_weight: 0.05
+
+# Conditioning toggle: when true, the model expects concatenated [x_t, WF]
+# Set to true for WF-conditioned training; false for unconditioned
+use_conditioning: true
+
+# Conditioning type: 'wf' (concatenate WF), or 'none'
+conditioning_type: wf
+
+# Limit iterations per epoch regardless of dataset size
+steps_per_epoch: 1000
 

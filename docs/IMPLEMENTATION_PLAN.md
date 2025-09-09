@@ -281,7 +281,7 @@ import numpy as np
 from PIL import Image
 
 class SynthesisDataset(Dataset):
-    """Dataset for synthesizing training pairs from ImageNet/BioTISR."""
+    """Dataset for synthesizing training pairs from ImageNet-like sources."""
     
     def __init__(
         self,
@@ -1672,7 +1672,7 @@ pip install -e .
 ### 1. Prepare Data
 
 ```bash
-# Download ImageNet subset and BioTISR
+# Download ImageNet subset
 python scripts/download_data.py --data-dir data/
 
 # Synthesize training data

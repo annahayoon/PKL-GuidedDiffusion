@@ -91,7 +91,8 @@ class DDIMSampler:
         shape: tuple, 
         device: Optional[str] = None, 
         verbose: bool = True,
-        return_intermediates: bool = False
+        return_intermediates: bool = False,
+        conditioner: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         """Run guided DDIM sampling.
         
@@ -134,11 +135,11 @@ class DDIMSampler:
                     intermediates["x0_predictions"].append(x_t.clone())
                 break
             
-            # Predict clean image
-            x0_hat = self._predict_x0(x_t, t_cur)
+            # Predict clean image with optional conditioner
+            x0_hat = self._predict_x0(x_t, t_cur, conditioner)
             
             # Apply guidance correction (except at final step)
-            if t_cur > 0:
+            if t_cur > 0 and self.forward_model is not None:
                 try:
                     x0_hat_corrected = self._apply_guidance(x0_hat, y, t_cur)
                 except Exception as e:
@@ -170,7 +171,7 @@ class DDIMSampler:
         
         return x0_intensity
 
-    def _predict_x0(self, x_t: torch.Tensor, t: Union[int, torch.Tensor]) -> torch.Tensor:
+    def _predict_x0(self, x_t: torch.Tensor, t: Union[int, torch.Tensor], conditioner: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Predict clean image x0 from noisy input x_t at timestep t."""
         # Convert timestep to tensor
         if not isinstance(t, torch.Tensor):
@@ -190,12 +191,18 @@ class DDIMSampler:
         # Use EMA model if available
         net = self.model.ema_model if getattr(self.model, 'use_ema', False) else self.model.model
         
-        # Model prediction
+        # Model prediction (optionally conditioned)
         if self.use_autocast and x_t.is_cuda:
             with torch.autocast(device_type='cuda', dtype=torch.float16):
-                model_output = net(x_t, t)
+                if conditioner is not None:
+                    model_output = net(x_t, t, cond=conditioner)
+                else:
+                    model_output = net(x_t, t)
         else:
-            model_output = net(x_t, t)
+            if conditioner is not None:
+                model_output = net(x_t, t, cond=conditioner)
+            else:
+                model_output = net(x_t, t)
         
         # Handle different parameterizations
         if self.v_parameterization:

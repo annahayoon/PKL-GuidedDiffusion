@@ -1,4 +1,12 @@
 # Physics / forward model configuration
+use_psf: false
 psf_path: null
 background: 0.0
+
+# Optional bead-based PSF estimation
+use_bead_psf: false
+beads_dir: ${paths.root}/data_wf_tp/beads
+bead_crop_size: 33
+# If both are available, choose key: "with_AO" or "no_AO"; when null, auto-select
+bead_mode: null
 

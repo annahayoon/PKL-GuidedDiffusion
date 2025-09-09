@@ -130,7 +130,7 @@ PKL-DiffusionDenoising/
 
 ### Training Pipeline
 ```
-ImageNet/BioTISR Images
+ImageNet-like Images
         ↓
 [Data Synthesis Module]
     - Load clean images

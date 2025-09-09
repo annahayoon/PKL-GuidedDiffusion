@@ -77,7 +77,7 @@ pip install -e .
 ### 1. Prepare Data
 
 ```bash
-# Download ImageNet subset and BioTISR
+# Download ImageNet subset
 python scripts/download_data.py --data-dir data/
 
 # Synthesize training data

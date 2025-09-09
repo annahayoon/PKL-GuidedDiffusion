@@ -2,6 +2,9 @@
 checkpoint_path: ${paths.checkpoints}/final_model.pt
 input_dir: ${paths.data}/val
 output_dir: ${paths.outputs}/inference
-ddim_steps: 10
+ddim_steps: 100
 eta: 0.0
+use_ema: true
+auto_scale_measurement: true
+num_samples_avg: 1
 

@@ -42,11 +42,11 @@ python -m unittest -q
 Data preparation
 ----------------
 
-Use the provided CLIs to fetch a license-friendly ImageNet-like subset, set up BioTISR/Allen roots, and aggregate images for training.
+Use the provided CLIs to fetch a license-friendly ImageNet-like subset and aggregate images for training.
 
 ```
 # 1) Download datasets into data/raw (Imagenette subset by default)
-python3 scripts/download_data.py --data-dir /home/jilab/anna_OS_ML/PKL-DiffusionDenoising/data --skip-biotisr --skip-allen
+python3 scripts/download_data.py --data-dir /home/jilab/anna_OS_ML/PKL-DiffusionDenoising/data
 
 # 2) Aggregate images into data/{train,val}/classless
 python3 scripts/prepare_images.py \
@@ -62,8 +62,7 @@ python3 scripts/synthesize_data.py \
 ```
 
 Notes:
-- BioTISR: see [BioTISR (Zenodo)](https://zenodo.org/records/15354981). The 2D dataset is at [DOI: 10.5281/zenodo.13843670](https://doi.org/10.5281/zenodo.13843670). For 3D datasets (WF and Raw SIM inputs), follow the links listed on the Zenodo record page. If you have direct file URLs, pass one via `--biotisr-url`; otherwise download manually and place files under `data/raw/biotisr/`.
-- Allen Brain Observatory (Visual Coding): see [Allen Visual Coding](https://observatory.brain-map.org/visualcoding/search/overview?sort_field=tld1_name&sort_dir=asc) for experiment listings and manual downloads. Use AllenSDK/AWS Open Data to programmatically fetch frames, then place exported images under `data/raw/allen_observatory/` before aggregation.
+The default dataset is the open Imagenette subset. Place any additional raw images under `data/raw/` if desired.
 
 Project structure (Phase 1)
 ---------------------------

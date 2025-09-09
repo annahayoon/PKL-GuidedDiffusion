@@ -406,7 +406,7 @@ class TrainingDataSynthesizer(Dataset):
     """
     Creates training pairs from regular images.
     
-    Takes ImageNet/BioTISR images and creates:
+    Takes ImageNet-like images and creates:
     - Clean "2P-like" targets
     - Degraded "WF-like" inputs
     """

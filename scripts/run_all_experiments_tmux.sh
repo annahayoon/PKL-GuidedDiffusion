@@ -60,6 +60,7 @@ ensure_tmux
 ensure_python
 
 export PROJECT_ROOT
+export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,expandable_segments:True,garbage_collection_threshold:0.8"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
@@ -87,8 +88,8 @@ AUTO_SCALE_BATCH="${AUTO_SCALE_BATCH:-1}"
 EVAL_SUBSET="${EVAL_SUBSET:-auto}"
 EVAL_TIF_DIR="$OUT_DIR/eval_tif"
 
-# Autotune NUM_WORKERS if not set explicitly
-if [ -z "${NUM_WORKERS_SET:-}" ] && [ -z "${NUM_WORKERS+x}" ]; then
+# Autotune NUM_WORKERS if not set explicitly (or is empty)
+if [ -z "${NUM_WORKERS_SET:-}" ] && [ -z "${NUM_WORKERS:-}" ]; then
   # Favor 8 by default; scale up to 16 on large-CPU hosts
   if [ "$CORES" -ge 48 ]; then
     NUM_WORKERS=16
@@ -97,8 +98,8 @@ if [ -z "${NUM_WORKERS_SET:-}" ] && [ -z "${NUM_WORKERS+x}" ]; then
   fi
 fi
 
-# Autotune initial BATCH_SIZE if not set explicitly
-if [ -z "${BATCH_SIZE_SET:-}" ] && [ -z "${BATCH_SIZE+x}" ]; then
+# Autotune initial BATCH_SIZE if not set explicitly (or is empty)
+if [ -z "${BATCH_SIZE_SET:-}" ] && [ -z "${BATCH_SIZE:-}" ]; then
   if [ "$DEVICE" = "cuda" ]; then
     # Conservative mapping for 256x256 UNet-small
     if [ "${GPU_MEM_FREE:-0}" -ge 36000 ]; then
@@ -134,17 +135,17 @@ log "Auto-config: CORES=$CORES, MEM_AVAILABLE_GB=$MEM_AVAIL_GB, GPU=$GPU_NAME to
 log "Auto-config: DEVICE=$DEVICE, BATCH_SIZE=$BATCH_SIZE, NUM_WORKERS=$NUM_WORKERS, EVAL_SUBSET=$EVAL_SUBSET"
 
 # Build commands
-CMD_PREPARE="python3 scripts/process_real_data.py \
+CMD_PREPARE="PYTHONPATH=\"$PROJECT_ROOT:${PYTHONPATH:-}\" python3 scripts/process_real_data.py \
   --wf-path \"$WF_PATH\" \
   --tp-path \"$TP_PATH\" \
   --beads-dir \"$BEADS_DIR\" \
   --output-dir \"$DATA_DIR_REAL\" \
   --create-splits"
 
-CMD_SPLITS="python3 scripts/create_frame_based_splits.py \
+CMD_SPLITS="PYTHONPATH=\"$PROJECT_ROOT:${PYTHONPATH:-}\" python3 scripts/create_frame_based_splits.py \
   --data-dir \"$DATA_DIR_REAL\""
 
-CMD_TRAIN="python3 scripts/train_real_data.py \
+CMD_TRAIN="PYTHONPATH=\"$PROJECT_ROOT:${PYTHONPATH:-}\" python3 scripts/train_real_data.py \
   wandb.mode=disabled \
   experiment.device=$DEVICE \
   training.max_epochs=$MAX_EPOCHS \
@@ -158,14 +159,14 @@ CMD_TRAIN="python3 scripts/train_real_data.py \
 # Use latest checkpoint produced by training for inference/eval
 CHECKPOINT_PATH="$CHECKPOINTS_DIR/final_model.pt"
 
-CMD_INFER="python3 scripts/inference.py \
+CMD_INFER="PYTHONPATH=\"$PROJECT_ROOT:${PYTHONPATH:-}\" python3 scripts/inference.py \
   experiment.device=$DEVICE \
   inference.checkpoint_path=\"$CHECKPOINT_PATH\" \
   inference.input_dir=\"$EVAL_TIF_DIR/wf\" \
   inference.output_dir=\"$INFER_OUT_DIR\""
 
 # Evaluation will operate on TIF-converted copies of test WF/2P (to match evaluator expectations)
-CMD_EVAL="python3 scripts/evaluate.py \
+CMD_EVAL="PYTHONPATH=\"$PROJECT_ROOT:${PYTHONPATH:-}\" python3 scripts/evaluate.py \
   experiment.device=$DEVICE \
   inference.checkpoint_path=\"$CHECKPOINT_PATH\" \
   inference.input_dir=\"$EVAL_TIF_DIR/wf\" \
@@ -203,6 +204,72 @@ for wf_path in wf_files:
     tifffile.imwrite(os.path.join(out_2p, f'{stem}.tif'), arr_2p)
 PY
 
+# Helper: generate PNG previews (WF | PRED | GT)
+cat >"$LOG_DIR/make_previews.py" <<'PY'
+import sys, os, glob
+import numpy as np
+from PIL import Image
+import tifffile
+
+if len(sys.argv) < 5:
+    print("usage: make_previews.py <src_wf_tif_dir> <pred_dir> <src_2p_tif_dir> <out_dir> [max_n]")
+    sys.exit(1)
+
+src_wf, pred_dir, src_2p, out_dir = sys.argv[1:5]
+max_n = int(sys.argv[5]) if len(sys.argv) > 5 else 24
+
+os.makedirs(out_dir, exist_ok=True)
+
+def read_any(p):
+    if p.lower().endswith((".tif", ".tiff")):
+        return tifffile.imread(p)
+    return np.array(Image.open(p))
+
+def to_uint8(a):
+    a = a.astype(np.float32)
+    lo, hi = np.percentile(a, (1, 99))
+    if hi <= lo:
+        lo, hi = float(a.min()), float(a.max())
+    if hi <= lo:
+        a = np.clip(a, 0, 1)
+    else:
+        a = (a - lo) / (hi - lo)
+    return (np.clip(a, 0, 1) * 255).astype(np.uint8)
+
+wf_files = sorted(glob.glob(os.path.join(src_wf, '*.tif')))
+if max_n > 0:
+    wf_files = wf_files[:max_n]
+
+count = 0
+for wf_path in wf_files:
+    stem = os.path.splitext(os.path.basename(wf_path))[0]
+    pred = None
+    for ext in ('.tif', '.tiff', '.png'):
+        cand = os.path.join(pred_dir, stem + ext)
+        if os.path.exists(cand):
+            pred = cand
+            break
+    if pred is None:
+        continue
+    gt = None
+    for ext in ('.tif', '.tiff', '.png'):
+        cand = os.path.join(src_2p, stem + ext)
+        if os.path.exists(cand):
+            gt = cand
+            break
+
+    wf_u8 = to_uint8(read_any(wf_path))
+    pred_u8 = to_uint8(read_any(pred))
+    panels = [wf_u8, pred_u8]
+    if gt is not None:
+        panels.append(to_uint8(read_any(gt)))
+    strip = np.concatenate(panels, axis=1)
+    Image.fromarray(strip).save(os.path.join(out_dir, f'{stem}_wf_pred{"_gt" if gt is not None else ""}.png'))
+    count += 1
+
+print(f"Generated {count} preview(s) in {out_dir}")
+PY
+
 # Helper: training with automatic batch-size downscaling on OOM
 cat >"$LOG_DIR/03_train_autoscale.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -216,7 +283,7 @@ success=0
 for bs in "${TRY_LIST[@]}"; do
   echo "== Training with batch_size=${bs} ==" | tee -a "$LOG_DIR/03_train.log"
   set +e
-  python3 scripts/train_real_data.py \
+  PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}" python3 scripts/train_real_data.py \
     wandb.mode=disabled \
     experiment.device="$DEVICE" \
     training.max_epochs="$MAX_EPOCHS" \
@@ -299,6 +366,7 @@ tmux new-session -d -s "$SESSION" -n run
 # Pane 1: Preprocess + splits
 tmux send-keys -t "$SESSION":run.0 "set -euo pipefail" C-m
 tmux send-keys -t "$SESSION":run.0 "cd \"$PROJECT_ROOT\"" C-m
+tmux send-keys -t "$SESSION":run.0 "[ -f \"$PROJECT_ROOT/.venv/bin/activate\" ] && source \"$PROJECT_ROOT/.venv/bin/activate\" || true" C-m
 tmux send-keys -t "$SESSION":run.0 "bash \"$LOG_DIR/01_preprocess_or_skip.sh\" \"$DATA_DIR_REAL\" \"$LOG_DIR\" \"$CMD_PREPARE\" \"$CMD_SPLITS\"" C-m
 tmux send-keys -t "$SESSION":run.0 "echo '== Preprocessing/splits stage finished (skip logic applied) =='" C-m
 
@@ -306,6 +374,7 @@ tmux send-keys -t "$SESSION":run.0 "echo '== Preprocessing/splits stage finished
 tmux split-window -v -t "$SESSION":run
 tmux send-keys -t "$SESSION":run.1 "set -euo pipefail" C-m
 tmux send-keys -t "$SESSION":run.1 "cd \"$PROJECT_ROOT\"" C-m
+tmux send-keys -t "$SESSION":run.1 "[ -f \"$PROJECT_ROOT/.venv/bin/activate\" ] && source \"$PROJECT_ROOT/.venv/bin/activate\" || true" C-m
 tmux send-keys -t "$SESSION":run.1 "echo '== Waiting for splits to exist =='" C-m
 tmux send-keys -t "$SESSION":run.1 "while [ ! -d \"$DATA_DIR_REAL/splits/train/wf\" ]; do sleep 5; done" C-m
 tmux send-keys -t "$SESSION":run.1 "echo '== Training real-data model ==' | tee \"$LOG_DIR/03_train.log\"" C-m
@@ -320,6 +389,7 @@ tmux send-keys -t "$SESSION":run.1 "echo '== Training complete =='" C-m
 tmux split-window -h -t "$SESSION":run
 tmux send-keys -t "$SESSION":run.2 "set -euo pipefail" C-m
 tmux send-keys -t "$SESSION":run.2 "cd \"$PROJECT_ROOT\"" C-m
+tmux send-keys -t "$SESSION":run.2 "[ -f \"$PROJECT_ROOT/.venv/bin/activate\" ] && source \"$PROJECT_ROOT/.venv/bin/activate\" || true" C-m
 tmux send-keys -t "$SESSION":run.2 "echo '== Waiting for checkpoint =='" C-m
 tmux send-keys -t "$SESSION":run.2 "while [ ! -f \"$CHECKPOINT_PATH\" ]; do sleep 10; done" C-m
 tmux send-keys -t "$SESSION":run.2 "echo '== Preparing TIF inputs for inference/evaluation ==' | tee \"$LOG_DIR/04_infer.log\"" C-m
@@ -329,10 +399,15 @@ tmux send-keys -t "$SESSION":run.2 "$CMD_INFER 2>&1 | tee -a \"$LOG_DIR/04_infer
 tmux send-keys -t "$SESSION":run.2 "echo '== Inference complete =='" C-m
 tmux send-keys -t "$SESSION":run.2 "touch \"$LOG_DIR/.inference_done\"" C-m
 
+# Generate PNG previews into outputs/<run>/viz_preview
+tmux send-keys -t "$SESSION":run.2 "echo '== Generating PNG previews ==' | tee -a \"$LOG_DIR/04_infer.log\"" C-m
+tmux send-keys -t "$SESSION":run.2 "python3 \"$LOG_DIR/make_previews.py\" \"$EVAL_TIF_DIR/wf\" \"$INFER_OUT_DIR\" \"$EVAL_TIF_DIR/2p\" \"$OUT_DIR/viz_preview\" 2>&1 | tee -a \"$LOG_DIR/04_infer.log\"" C-m
+
 # Pane 4: Evaluation + thresholds (waits for checkpoint)
 tmux split-window -v -t "$SESSION":run.2
 tmux send-keys -t "$SESSION":run.3 "set -euo pipefail" C-m
 tmux send-keys -t "$SESSION":run.3 "cd \"$PROJECT_ROOT\"" C-m
+tmux send-keys -t "$SESSION":run.3 "[ -f \"$PROJECT_ROOT/.venv/bin/activate\" ] && source \"$PROJECT_ROOT/.venv/bin/activate\" || true" C-m
 tmux send-keys -t "$SESSION":run.3 "echo '== Waiting for checkpoint and inference to finish =='" C-m
 tmux send-keys -t "$SESSION":run.3 "while [ ! -f \"$CHECKPOINT_PATH\" ]; do sleep 10; done" C-m
 tmux send-keys -t "$SESSION":run.3 "while [ ! -f \"$LOG_DIR/.inference_done\" ]; do sleep 5; done" C-m

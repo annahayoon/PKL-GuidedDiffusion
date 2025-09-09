@@ -11,13 +11,14 @@ import wandb
 from torch.utils.tensorboard import SummaryWriter
 from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
+from PIL import Image
+import numpy as np
 
 from pkl_dg.models.unet import DenoisingUNet
 from pkl_dg.models.diffusion import DDPMTrainer
 from pkl_dg.data.synthesis import SynthesisDataset
-from pkl_dg.data.transforms import IntensityToModel
-from pkl_dg.physics.psf import PSF
-from pkl_dg.physics.forward_model import ForwardModel
+from pkl_dg.data.transforms import IntensityToModel, AnscombeToModel
+ 
 
 
 def run_training(cfg: DictConfig) -> DDPMTrainer:
@@ -49,19 +50,18 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
     checkpoint_dir = str(cfg.paths.checkpoints)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    # Create forward model for data synthesis
-    psf = PSF(getattr(cfg.physics, "psf_path", None))
-    forward_model = ForwardModel(
-        psf=psf.to_torch(device="cpu"),
-        background=float(cfg.physics.background),
-        device="cpu",
-    )
+    # No PSF / forward model usage
+    forward_model = None
 
     # Create transform (respect codebase camelCase constructor args)
-    transform = IntensityToModel(
-        minIntensity=float(cfg.data.min_intensity),
-        maxIntensity=float(cfg.data.max_intensity),
-    )
+    noise_model = str(getattr(cfg.data, "noise_model", "gaussian")).lower()
+    if noise_model == "poisson":
+        transform = AnscombeToModel(maxIntensity=float(cfg.data.max_intensity))
+    else:
+        transform = IntensityToModel(
+            minIntensity=float(cfg.data.min_intensity),
+            maxIntensity=float(cfg.data.max_intensity),
+        )
 
     # Create datasets
     train_dataset = SynthesisDataset(
@@ -97,8 +97,13 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
         pin_memory=True,
     )
 
-    # Create model
-    unet = DenoisingUNet(OmegaConf.to_container(cfg.model, resolve=True))
+    # Create model; set in_channels=2 when conditioning is enabled
+    model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
+    use_conditioning = bool(getattr(cfg.training, "use_conditioning", False))
+    conditioning_type = str(getattr(cfg.training, "conditioning_type", "wf")).lower()
+    if use_conditioning and conditioning_type == "wf" and int(model_cfg.get("in_channels", 1)) == 1:
+        model_cfg["in_channels"] = 2  # x_t + WF conditioner
+    unet = DenoisingUNet(model_cfg)
 
     # Create trainer module (LightningModule-like API but we won't use Lightning's Trainer)
     ddpm_trainer = DDPMTrainer(
@@ -143,6 +148,33 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
     global_step = 0
     last_val_loss: Optional[float] = None
 
+    # Create samples output dir
+    samples_dir = os.path.join(str(cfg.paths.outputs), "samples", cfg.experiment.name)
+    os.makedirs(samples_dir, exist_ok=True)
+
+    def _save_samples(epoch_idx: int, num_rows: int = 2, num_cols: int = 8) -> None:
+        """Generate and save a grid of samples like ddpm.py during training."""
+        try:
+            ddpm_trainer.eval()
+            with torch.no_grad():
+                num_images = num_rows * num_cols
+                H = int(getattr(cfg.data, "image_size", 128))
+                W = H
+                samples = ddpm_trainer.ddpm_sample(num_images=num_images, image_shape=(1, H, W), use_ema=True)
+                samples = transform.inverse(samples.clamp(-1, 1)).cpu().numpy()
+                grid_h = num_rows * H
+                grid_w = num_cols * W
+                grid = np.zeros((grid_h, grid_w), dtype=np.float32)
+                for i in range(num_images):
+                    r = i // num_cols
+                    c = i % num_cols
+                    img = samples[i, 0]
+                    grid[r*H:(r+1)*H, c*W:(c+1)*W] = img
+                grid_img = (grid * 255.0).clip(0, 255).astype(np.uint8)
+                Image.fromarray(grid_img).save(os.path.join(samples_dir, f"epoch_{epoch_idx:03d}.png"))
+        except Exception:
+            pass
+
     # Training loop with progress and end-of-epoch checkpoints
     for epoch in range(max_epochs):
         ddpm_trainer.train()
@@ -151,12 +183,14 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
 
         progress = tqdm(train_loader, desc=f"Epoch {epoch+1}/{max_epochs} [train]", leave=False)
         optimizer.zero_grad(set_to_none=True)
+        max_steps_this_epoch = int(getattr(cfg.training, "steps_per_epoch", 0))
         for batch_idx, batch in enumerate(progress):
-            x_0, _ = batch
+            x_0, y_wf = batch
             x_0 = x_0.to(device, non_blocking=True)
+            y_wf = y_wf.to(device, non_blocking=True)
 
             with autocast(enabled=use_amp):
-                loss = ddpm_trainer.training_step((x_0, None), batch_idx)
+                loss = ddpm_trainer.training_step((x_0, y_wf), batch_idx)
 
             # Backward
             if use_amp:
@@ -192,6 +226,10 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
                 postfix["val"] = f"{last_val_loss:.4f}"
             progress.set_postfix(postfix)
 
+            # Stop at steps_per_epoch if configured
+            if max_steps_this_epoch > 0 and (batch_idx + 1) >= max_steps_this_epoch:
+                break
+
         avg_train_loss = epoch_train_loss / max(1, num_train_batches)
 
         # Validation
@@ -201,9 +239,10 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
         with torch.no_grad():
             val_progress = tqdm(val_loader, desc=f"Epoch {epoch+1}/{max_epochs} [val]", leave=False)
             for batch_idx, batch in enumerate(val_progress):
-                x_0, _ = batch
+                x_0, y_wf = batch
                 x_0 = x_0.to(device, non_blocking=True)
-                loss = ddpm_trainer.validation_step((x_0, None), batch_idx)
+                y_wf = y_wf.to(device, non_blocking=True)
+                loss = ddpm_trainer.validation_step((x_0, y_wf), batch_idx)
                 val_loss_accum += float(loss.detach().item())
                 val_batches += 1
                 running_avg = val_loss_accum / max(1, val_batches)
@@ -224,6 +263,9 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
         writer.add_scalar("epoch/train_loss", avg_train_loss, epoch + 1)
         writer.add_scalar("epoch/val_loss", avg_val_loss, epoch + 1)
 
+        # Save samples like ddpm.py
+        _save_samples(epoch + 1)
+
         # End-of-epoch checkpoints (save trainer, model, and EMA if present)
         epoch_ckpt_prefix = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}")
         torch.save(ddpm_trainer.state_dict(), f"{epoch_ckpt_prefix}_trainer.pt")
@@ -236,6 +278,9 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
                 torch.save(ddpm_trainer.ema_model.state_dict(), f"{epoch_ckpt_prefix}_ema_model.pt")
             except Exception:
                 pass
+
+        # Save a vis image each epoch
+        _save_samples(epoch + 1)
 
     # Save final model
     torch.save(ddpm_trainer.state_dict(), f"{checkpoint_dir}/final_model.pt")

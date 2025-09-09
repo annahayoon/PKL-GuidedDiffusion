@@ -8,8 +8,6 @@ from tqdm import tqdm
 
 from pkl_dg.data.downloaders import (
     download_imagenet_subset,
-    download_biotisr,
-    download_allen_observatory,
     prepare_image_folders,
 )
 
@@ -18,7 +16,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="End-to-end dataset preprocessing")
     parser.add_argument("--root", type=str, default=str(Path(__file__).resolve().parents[1]), help="Project root")
     parser.add_argument("--data-dir", type=str, default=None, help="Data root (defaults to <root>/data)")
-    parser.add_argument("--biotisr-url", type=str, default=None, help="Optional direct BioTISR archive URL")
+    # BioTISR/Allen options removed
     parser.add_argument("--skip-download", action="store_true", help="Skip downloads and use existing raw data")
     parser.add_argument("--skip-synthesize", action="store_true", help="Skip synthesis stage")
     parser.add_argument("--image-size", type=int, default=256)
@@ -42,23 +40,14 @@ def main():
         imagenet_root = download_imagenet_subset(raw_root)
         print(f"[OK] Imagenette subset at: {imagenet_root}")
 
-        biotisr_root = download_biotisr(raw_root, url=args.biotisr_url)
-        print(f"[OK] BioTISR root at: {biotisr_root}")
-
-        allen_root = download_allen_observatory(raw_root)
-        print(f"[OK] Allen Observatory root at: {allen_root}")
+        # Only Imagenet subset is downloaded here
 
     # Aggregate all available raw sources
     raw_dirs = []
     imagenet_dir = raw_root / "imagenet_subset" / "imagenette2-320"
     if imagenet_dir.exists():
         raw_dirs += [imagenet_dir / "train", imagenet_dir / "val"]
-    biotisr_dir = raw_root / "biotisr"
-    if biotisr_dir.exists():
-        raw_dirs.append(biotisr_dir)
-    allen_dir = raw_root / "allen_observatory"
-    if allen_dir.exists():
-        raw_dirs.append(allen_dir)
+    # Only include imagenet-derived dirs
 
     prepare_image_folders([Path(p) for p in raw_dirs], images_root, train_ratio=args.train_ratio)
     print(f"[OK] Aggregated raw images into: {images_root}")

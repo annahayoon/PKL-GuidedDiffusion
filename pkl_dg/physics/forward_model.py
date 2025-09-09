@@ -41,6 +41,26 @@ class ForwardModel:
         
         self._precompute_common_ffts(common_sizes)
 
+    def condition_on_psf_params(self) -> torch.Tensor:
+        """Return simple PSF parameterization (sigma_x, sigma_y) for conditioning.
+
+        Uses second-moment approximation of current PSF as a lightweight prior.
+        """
+        psf = self.psf.detach().float()
+        if psf.ndim == 4:
+            psf = psf[0, 0]
+        h, w = psf.shape
+        yy, xx = torch.meshgrid(torch.arange(h, device=psf.device), torch.arange(w, device=psf.device), indexing='ij')
+        psf_pos = torch.clamp(psf, min=0)
+        s = psf_pos.sum() + 1e-8
+        y0 = (psf_pos * yy).sum() / s
+        x0 = (psf_pos * xx).sum() / s
+        var_y = (psf_pos * (yy - y0) ** 2).sum() / s
+        var_x = (psf_pos * (xx - x0) ** 2).sum() / s
+        sigma_y = torch.sqrt(torch.clamp(var_y, min=1e-8))
+        sigma_x = torch.sqrt(torch.clamp(var_x, min=1e-8))
+        return torch.stack([sigma_x, sigma_y]).view(1, 2)
+
     def _precompute_common_ffts(self, common_sizes: list) -> None:
         """Pre-compute PSF FFTs for common image sizes to improve runtime performance."""
         common_dtypes = [torch.float32, torch.float16]  # Most common dtypes in inference
