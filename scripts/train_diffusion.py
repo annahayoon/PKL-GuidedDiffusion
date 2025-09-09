@@ -1,5 +1,6 @@
 import os
 from typing import Optional, Tuple, Union
+from contextlib import nullcontext
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -18,6 +19,8 @@ from pkl_dg.models.unet import DenoisingUNet
 from pkl_dg.models.diffusion import DDPMTrainer
 from pkl_dg.data.synthesis import SynthesisDataset
 from pkl_dg.data.transforms import IntensityToModel, AnscombeToModel
+from pkl_dg.utils import MemoryProfiler, profile_memory_usage
+from pkl_dg.utils.adaptive_batch import get_optimal_batch_size
  
 
 
@@ -105,7 +108,7 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
         model_cfg["in_channels"] = 2  # x_t + WF conditioner
     unet = DenoisingUNet(model_cfg)
 
-    # Create trainer module (LightningModule-like API but we won't use Lightning's Trainer)
+    # Create trainer module (LightningModule-like API; optionally use Lightning Trainer for multi-GPU)
     ddpm_trainer = DDPMTrainer(
         model=unet,
         config=OmegaConf.to_container(cfg.training, resolve=True),
@@ -116,6 +119,134 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
         cfg.experiment.device if torch.cuda.is_available() and cfg.experiment.device == "cuda" else "cpu"
     )
     ddpm_trainer.to(device)
+
+    # Optional: Multi-GPU training via PyTorch Lightning Trainer
+    use_multi_gpu = False
+    try:
+        requested_devices = int(getattr(cfg.training, "devices", 1))
+    except Exception:
+        requested_devices = 1
+    distributed_enabled = bool(getattr(cfg.training, "distributed", {}).get("enabled", False)) if hasattr(cfg.training, "distributed") else False
+    accelerator = str(getattr(cfg.training, "accelerator", "gpu"))
+    precision = str(getattr(cfg.training, "precision", "16-mixed")) if bool(getattr(cfg.experiment, "mixed_precision", False)) else "32-true"
+
+    # We only attempt Lightning multi-GPU when GPUs are available and requested > 1
+    if accelerator == "gpu" and torch.cuda.is_available() and torch.cuda.device_count() >= 2 and (requested_devices > 1 or distributed_enabled):
+        try:
+            import pytorch_lightning as pl  # type: ignore
+            from pytorch_lightning.strategies import DDPStrategy  # type: ignore
+            from pytorch_lightning.callbacks import ModelCheckpoint  # type: ignore
+
+            ckpt_cb = ModelCheckpoint(
+                dirpath=checkpoint_dir,
+                filename="ddpm-{epoch:03d}-{val_loss:.4f}",
+                save_top_k=3,
+                monitor="val/loss",
+                mode="min",
+                save_last=True,
+                every_n_epochs=1,
+            )
+
+            trainer = pl.Trainer(
+                devices=requested_devices,
+                accelerator="gpu",
+                strategy=DDPStrategy(find_unused_parameters=False),
+                precision=precision,
+                max_epochs=int(cfg.training.max_epochs),
+                enable_progress_bar=True,
+                log_every_n_steps=50,
+                callbacks=[ckpt_cb],
+            )
+
+            # Fit using external dataloaders to avoid adding hooks to the module
+            trainer.fit(ddpm_trainer, train_dataloaders=train_loader, val_dataloaders=val_loader)
+
+            # Save final checkpoint on global zero only
+            is_global_zero = getattr(trainer, "is_global_zero", True)
+            if is_global_zero:
+                torch.save(ddpm_trainer.state_dict(), f"{checkpoint_dir}/final_model.pt")
+
+            return ddpm_trainer
+        except Exception:
+            # Fall back to single-process loop
+            pass
+
+    # Optional dynamic batch sizing (rebuild loaders with optimal batch size)
+    enable_dynamic_bs = bool(getattr(cfg.training, "dynamic_batch_sizing", False))
+    if enable_dynamic_bs:
+        try:
+            H = int(getattr(cfg.data, "image_size", 128))
+            C = int(model_cfg.get("in_channels", 1))
+            input_shape = (C, H, H)
+            safety = float(getattr(cfg.training, "dynamic_batch_safety_factor", 0.8))
+            grad_ckpt = bool(getattr(cfg.training, "gradient_checkpointing", False))
+            optimal_bs = get_optimal_batch_size(
+                ddpm_trainer.model,
+                input_shape,
+                device=device,
+                mixed_precision=use_amp,
+                gradient_checkpointing=grad_ckpt,
+                safety_factor=safety,
+                verbose=False,
+            )
+            # Rebuild loaders with optimal batch size
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset,
+                batch_size=optimal_bs,
+                shuffle=True,
+                num_workers=int(cfg.training.num_workers),
+                pin_memory=True,
+                persistent_workers=bool(getattr(cfg.training, "persistent_workers", True)),
+                prefetch_factor=int(getattr(cfg.training, "prefetch_factor", 2)),
+            )
+            val_loader = torch.utils.data.DataLoader(
+                val_dataset,
+                batch_size=optimal_bs,
+                shuffle=False,
+                num_workers=int(cfg.training.num_workers),
+                pin_memory=True,
+                persistent_workers=bool(getattr(cfg.training, "persistent_workers", True)),
+                prefetch_factor=int(getattr(cfg.training, "prefetch_factor", 2)),
+            )
+        except Exception:
+            pass
+
+    # Full Lightning training mode (single GPU/CPU) controlled by flag
+    use_lightning = bool(getattr(cfg.training, "use_lightning", False))
+    if use_lightning:
+        try:
+            import pytorch_lightning as pl  # type: ignore
+            from pytorch_lightning.callbacks import ModelCheckpoint  # type: ignore
+
+            accel = "gpu" if (accelerator == "gpu" and torch.cuda.is_available()) else "cpu"
+            devs = requested_devices if (accel == "gpu" and requested_devices > 0) else 1
+
+            ckpt_cb = ModelCheckpoint(
+                dirpath=checkpoint_dir,
+                filename="ddpm-{epoch:03d}-{val_loss:.4f}",
+                save_top_k=3,
+                monitor="val/loss",
+                mode="min",
+                save_last=True,
+                every_n_epochs=1,
+            )
+
+            trainer = pl.Trainer(
+                devices=devs,
+                accelerator=accel,
+                precision=precision if accel == "gpu" else "32-true",
+                max_epochs=int(cfg.training.max_epochs),
+                enable_progress_bar=True,
+                log_every_n_steps=50,
+                callbacks=[ckpt_cb],
+            )
+
+            trainer.fit(ddpm_trainer, train_dataloaders=train_loader, val_dataloaders=val_loader)
+            torch.save(ddpm_trainer.state_dict(), f"{checkpoint_dir}/final_model.pt")
+            return ddpm_trainer
+        except Exception:
+            # Fall back below to built-in loop
+            pass
 
     # TensorBoard writer
     logs_dir = str(cfg.paths.logs) if hasattr(cfg, "paths") and hasattr(cfg.paths, "logs") else os.path.join(os.getcwd(), "logs")
@@ -175,7 +306,8 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
         except Exception:
             pass
 
-    # Training loop with progress and end-of-epoch checkpoints
+    # Training loop with progress and end-of-epoch checkpoints (single-process fallback)
+    enable_mem_profile = bool(getattr(cfg.experiment, "enable_memory_profiling", False))
     for epoch in range(max_epochs):
         ddpm_trainer.train()
         epoch_train_loss = 0.0
@@ -262,6 +394,12 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
         # Epoch-level TensorBoard
         writer.add_scalar("epoch/train_loss", avg_train_loss, epoch + 1)
         writer.add_scalar("epoch/val_loss", avg_val_loss, epoch + 1)
+        if enable_mem_profile:
+            mem_snapshot = profile_memory_usage()
+            if isinstance(mem_snapshot, dict):
+                writer.add_scalar("memory/allocated_mb", float(mem_snapshot.get("allocated_mb", 0.0)), epoch + 1)
+                writer.add_scalar("memory/reserved_mb", float(mem_snapshot.get("reserved_mb", 0.0)), epoch + 1)
+                writer.add_scalar("memory/peak_allocated_mb", float(mem_snapshot.get("peak_allocated_mb", 0.0)), epoch + 1)
 
         # Save samples like ddpm.py
         _save_samples(epoch + 1)

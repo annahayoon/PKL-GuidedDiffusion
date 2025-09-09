@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from typing import Dict, Any
 import math
 
@@ -35,8 +36,12 @@ class ResidualBlock(nn.Module):
             self.residual_conv = nn.Conv2d(in_channels, out_channels, 1)
         else:
             self.residual_conv = nn.Identity()
+            
+        # Gradient checkpointing support
+        self.gradient_checkpointing = False
     
-    def forward(self, x, time_emb):
+    def _forward_impl(self, x, time_emb):
+        """Internal forward implementation for checkpointing."""
         h = self.conv1(x)
         h = self.norm1(h)
         h = F.silu(h)
@@ -51,6 +56,12 @@ class ResidualBlock(nn.Module):
         
         # Residual connection
         return h + self.residual_conv(x)
+    
+    def forward(self, x, time_emb):
+        if self.gradient_checkpointing and self.training:
+            return checkpoint(self._forward_impl, x, time_emb, use_reentrant=False)
+        else:
+            return self._forward_impl(x, time_emb)
 
 class DownBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_emb_dim, num_layers=2):
@@ -60,11 +71,19 @@ class DownBlock(nn.Module):
             for i in range(num_layers)
         ])
         self.downsample = nn.Conv2d(out_channels, out_channels, 3, stride=2, padding=1)
+        self.gradient_checkpointing = False
     
-    def forward(self, x, time_emb):
+    def _forward_impl(self, x, time_emb):
+        """Internal forward implementation for checkpointing."""
         for layer in self.layers:
             x = layer(x, time_emb)
         return self.downsample(x)
+    
+    def forward(self, x, time_emb):
+        if self.gradient_checkpointing and self.training:
+            return checkpoint(self._forward_impl, x, time_emb, use_reentrant=False)
+        else:
+            return self._forward_impl(x, time_emb)
 
 class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_emb_dim, num_layers=2):
@@ -74,12 +93,20 @@ class UpBlock(nn.Module):
             ResidualBlock(in_channels if i == 0 else out_channels, out_channels, time_emb_dim)
             for i in range(num_layers)
         ])
+        self.gradient_checkpointing = False
     
-    def forward(self, x, time_emb):
+    def _forward_impl(self, x, time_emb):
+        """Internal forward implementation for checkpointing."""
         x = self.upsample(x)
         for layer in self.layers:
             x = layer(x, time_emb)
         return x
+    
+    def forward(self, x, time_emb):
+        if self.gradient_checkpointing and self.training:
+            return checkpoint(self._forward_impl, x, time_emb, use_reentrant=False)
+        else:
+            return self._forward_impl(x, time_emb)
 
 class CustomUNet(nn.Module):
     """Custom UNet implementation for diffusion denoising.
@@ -141,6 +168,47 @@ class CustomUNet(nn.Module):
             nn.SiLU(),
             nn.Conv2d(self.block_out_channels[0], self.out_channels, 3, padding=1),
         )
+        
+        # Gradient checkpointing support
+        self.gradient_checkpointing = False
+    
+    def enable_gradient_checkpointing(self):
+        """Enable gradient checkpointing for all blocks."""
+        self.gradient_checkpointing = True
+        
+        # Enable for all ResidualBlocks in down blocks
+        for down_block in self.down_blocks:
+            down_block.gradient_checkpointing = True
+            for layer in down_block.layers:
+                layer.gradient_checkpointing = True
+        
+        # Enable for middle block
+        self.middle_block.gradient_checkpointing = True
+        
+        # Enable for all ResidualBlocks in up blocks
+        for up_block in self.up_blocks:
+            up_block.gradient_checkpointing = True
+            for layer in up_block.layers:
+                layer.gradient_checkpointing = True
+    
+    def disable_gradient_checkpointing(self):
+        """Disable gradient checkpointing for all blocks."""
+        self.gradient_checkpointing = False
+        
+        # Disable for all ResidualBlocks in down blocks
+        for down_block in self.down_blocks:
+            down_block.gradient_checkpointing = False
+            for layer in down_block.layers:
+                layer.gradient_checkpointing = False
+        
+        # Disable for middle block
+        self.middle_block.gradient_checkpointing = False
+        
+        # Disable for all ResidualBlocks in up blocks
+        for up_block in self.up_blocks:
+            up_block.gradient_checkpointing = False
+            for layer in up_block.layers:
+                layer.gradient_checkpointing = False
     
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         # Time embedding

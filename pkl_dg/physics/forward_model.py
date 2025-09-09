@@ -14,7 +14,7 @@ class ForwardModel:
     """WF to 2P forward model with PSF convolution and noise."""
 
     def __init__(self, psf: torch.Tensor, background: float = 0.0, device: str = "cuda", 
-                 common_sizes: Optional[list] = None):
+                 common_sizes: Optional[list] = None, read_noise_sigma: float = 0.0):
         """
         Initialize forward model.
 
@@ -26,13 +26,18 @@ class ForwardModel:
         """
         self.device = device
         self.background = background
+        # Read noise standard deviation (counts). When > 0, can be used by guidance.
+        self.read_noise_sigma = float(read_noise_sigma)
 
         # Ensure PSF is shape [1, 1, H, W]
         self.psf = psf.to(device)
         if self.psf.ndim == 2:
             self.psf = self.psf.unsqueeze(0).unsqueeze(0)
-        # Cache dict for PSF FFTs keyed by (H, W, dtype)
+        # Device/dtype-aware cache: (H, W, dtype, device_str) -> psf_fft tensor
         self._psf_fft_cache = {}
+        # Device-agnostic base cache to avoid recomputing FFTs when dtype changes:
+        # (H, W) -> psf_fft tensor stored on CPU in high precision
+        self._psf_fft_cache_base = {}
         
         # Pre-compute FFTs for common image sizes
         if common_sizes is None:
@@ -93,31 +98,48 @@ class ForwardModel:
         self._precompute_common_ffts(common_sizes)
 
     def _get_psf_fft(self, height: int, width: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
-        """Return cached PSF FFT for given size/dtype or compute and store it."""
-        key = (height, width, dtype)
-        cached = self._psf_fft_cache.get(key)
-        if cached is not None and cached.device == device:
-            return cached
+        """Return cached PSF FFT for given size/dtype or compute and store it.
 
-        psf_h, psf_w = self.psf.shape[-2:]
-        psf_padded = torch.zeros((1, 1, height, width), device=device, dtype=dtype)
-        psf_src = self.psf.to(device=device, dtype=dtype)
-        # If image smaller than PSF, center-crop PSF; otherwise place PSF then roll to center
-        if height < psf_h or width < psf_w:
-            start_h = max((psf_h - height) // 2, 0)
-            start_w = max((psf_w - width) // 2, 0)
-            end_h = start_h + min(psf_h, height)
-            end_w = start_w + min(psf_w, width)
-            cropped = psf_src[..., start_h:end_h, start_w:end_w]
-            ph, pw = cropped.shape[-2:]
-            psf_padded[..., :ph, :pw] = cropped
-            psf_padded = torch.roll(psf_padded, shifts=(-(ph // 2), -(pw // 2)), dims=(-2, -1))
-        else:
-            psf_padded[..., :psf_h, :psf_w] = psf_src
-            psf_padded = torch.roll(psf_padded, shifts=(-(psf_h // 2), -(psf_w // 2)), dims=(-2, -1))
-        psf_fft = torch.fft.rfft2(psf_padded)
-        self._psf_fft_cache[key] = psf_fft
-        return psf_fft
+        Optimizations:
+        - Maintain a high-precision CPU base cache per (H, W)
+        - Materialize device/dtype-specific tensors from the base cache to avoid recomputation
+        """
+        device_key = (height, width, str(dtype), str(device))
+        cached_dev = self._psf_fft_cache.get(device_key)
+        if cached_dev is not None:
+            return cached_dev
+
+        # Try base cache first (CPU, high precision)
+        base_key = (height, width)
+        base_fft = self._psf_fft_cache_base.get(base_key)
+
+        if base_fft is None:
+            # Build base FFT on CPU in float32 for stability
+            psf_h, psf_w = self.psf.shape[-2:]
+            psf_padded = torch.zeros((1, 1, height, width), device="cpu", dtype=torch.float32)
+            psf_src = self.psf.to(device="cpu", dtype=torch.float32)
+
+            # If image smaller than PSF, center-crop PSF; otherwise place PSF then roll to center
+            if height < psf_h or width < psf_w:
+                start_h = max((psf_h - height) // 2, 0)
+                start_w = max((psf_w - width) // 2, 0)
+                end_h = start_h + min(psf_h, height)
+                end_w = start_w + min(psf_w, width)
+                cropped = psf_src[..., start_h:end_h, start_w:end_w]
+                ph, pw = cropped.shape[-2:]
+                psf_padded[..., :ph, :pw] = cropped
+                psf_padded = torch.roll(psf_padded, shifts=(-(ph // 2), -(pw // 2)), dims=(-2, -1))
+            else:
+                psf_padded[..., :psf_h, :psf_w] = psf_src
+                psf_padded = torch.roll(psf_padded, shifts=(-(psf_h // 2), -(psf_w // 2)), dims=(-2, -1))
+
+            base_fft = torch.fft.rfft2(psf_padded)
+            self._psf_fft_cache_base[base_key] = base_fft
+
+        # Materialize for target device (cast at multiplication time if needed)
+        dev_fft = base_fft.to(device)
+        self._psf_fft_cache[device_key] = dev_fft
+        return dev_fft
 
     def _fft_convolve(self, x: torch.Tensor, psf: torch.Tensor) -> torch.Tensor:
         """
@@ -166,5 +188,12 @@ class ForwardModel:
         if add_noise:
             y = torch.poisson(torch.clamp(y, min=0))
         return y
+
+    def get_cache_stats(self) -> dict:
+        """Return cache statistics for testing and diagnostics."""
+        return {
+            "base_entries": len(self._psf_fft_cache_base),
+            "device_entries": len(self._psf_fft_cache),
+        }
 
 

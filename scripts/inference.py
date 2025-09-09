@@ -80,7 +80,8 @@ def run_inference(cfg: DictConfig) -> List[Path]:
                 psf = PSF(psf_path=str(psf_path)).to_torch(device=device)
             else:
                 psf = PSF().to_torch(device=device)
-            forward_model = ForwardModel(psf=psf, background=background, device=device)
+            read_noise_sigma = float(getattr(phys_cfg, "read_noise_sigma", 0.0))
+            forward_model = ForwardModel(psf=psf, background=background, device=device, read_noise_sigma=read_noise_sigma)
     except Exception:
         forward_model = None
 
@@ -114,18 +115,23 @@ def run_inference(cfg: DictConfig) -> List[Path]:
         max_intensity=float(cfg.data.max_intensity),
     )
 
-    # Sampler (DDIM by default; can be extended to DDPM guided sampling/averaging)
-    sampler = DDIMSampler(
-        model=ddpm,
-        forward_model=forward_model,
-        guidance_strategy=guidance,
-        schedule=schedule,
-        transform=transform,
-        num_timesteps=int(cfg.training.num_timesteps),
-        ddim_steps=int(cfg.inference.ddim_steps),
-        eta=float(cfg.inference.eta),
-        use_autocast=bool(getattr(cfg.inference, "use_autocast", True)),
-    )
+    # Choose sampler implementation
+    sampler_type = str(getattr(cfg.inference, "sampler", "ddim")).lower()
+    use_fast_karras = bool(getattr(cfg.inference, "use_karras_sigmas", True))
+    if sampler_type == "dpm_solver":
+        sampler = None  # Not used; we will call trainer.fast path
+    else:
+        sampler = DDIMSampler(
+            model=ddpm,
+            forward_model=forward_model,
+            guidance_strategy=guidance,
+            schedule=schedule,
+            transform=transform,
+            num_timesteps=int(cfg.training.num_timesteps),
+            ddim_steps=int(cfg.inference.ddim_steps),
+            eta=float(cfg.inference.eta),
+            use_autocast=bool(getattr(cfg.inference, "use_autocast", True)),
+        )
 
     # IO
     input_dir = Path(str(cfg.inference.input_dir))
@@ -164,9 +170,25 @@ def run_inference(cfg: DictConfig) -> List[Path]:
 
         use_conditioning = bool(getattr(cfg.training, "use_conditioning", True))
         conditioner = transform(y) if (use_conditioning and conditioning_type == "wf") else None
-        # DDIM: deterministic fast inference; DDPM averaging if configured
+        # Sampler selection: DPM-Solver++ fast path or DDIM
         num_samples = int(getattr(cfg.inference, "num_samples_avg", 1))
-        if num_samples <= 1:
+        if sampler_type == "dpm_solver":
+            # Use trainer's physics-guided fast scheduler sampling
+            reconstruction = ddpm.sample_with_scheduler_and_guidance(
+                y=y,
+                forward_model=forward_model,
+                guidance_strategy=guidance,
+                schedule=schedule,
+                transform=transform,
+                num_inference_steps=int(cfg.inference.ddim_steps),
+                device=device,
+                use_ema=bool(getattr(cfg.inference, "use_ema", True)),
+                use_karras_sigmas=use_fast_karras,
+            )
+            # Convert model domain to intensity for saving
+            out = transform.inverse(reconstruction).squeeze().detach().cpu().numpy().astype(np.float32)
+            reconstruction = transform.inverse(reconstruction)
+        elif num_samples <= 1:
             reconstruction = sampler.sample(y, shape, device=device, verbose=False, conditioner=conditioner)
         else:
             # Average multiple stochastic DDPM reconstructions via ddpm_guided_sample
@@ -183,7 +205,8 @@ def run_inference(cfg: DictConfig) -> List[Path]:
                 )
                 preds.append(pred)
             reconstruction = torch.stack(preds, dim=0).mean(dim=0)
-        out = reconstruction.squeeze().detach().cpu().numpy().astype(np.float32)
+        if sampler_type != "dpm_solver":
+            out = reconstruction.squeeze().detach().cpu().numpy().astype(np.float32)
 
         # Save TIF
         tif_path = output_dir / f"{img_path.stem}_reconstructed.tif"

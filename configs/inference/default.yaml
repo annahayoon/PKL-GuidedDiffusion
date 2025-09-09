@@ -8,3 +8,7 @@ use_ema: true
 auto_scale_measurement: true
 num_samples_avg: 1
 
+# Sampler selection: "ddim" (default) or "dpm_solver" (fast, recommended)
+sampler: ddim
+use_karras_sigmas: true
+

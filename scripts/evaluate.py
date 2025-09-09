@@ -73,7 +73,8 @@ def _load_model_and_sampler(cfg: DictConfig, guidance_type: str):
             else:
                 # Default Gaussian PSF if none provided
                 psf = PSF().to_torch(device=device)
-            forward_model = ForwardModel(psf=psf, background=background, device=device)
+            read_noise_sigma = float(getattr(phys_cfg, "read_noise_sigma", 0.0))
+            forward_model = ForwardModel(psf=psf, background=background, device=device, read_noise_sigma=read_noise_sigma)
     except Exception:
         forward_model = None
     if guidance_type == "pkl":
