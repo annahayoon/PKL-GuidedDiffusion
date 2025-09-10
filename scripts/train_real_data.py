@@ -322,6 +322,22 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
                 torch.save(ddpm_trainer.ema_model.state_dict(), f"{epoch_ckpt_prefix}_ema_model.pt")
             except Exception:
                 pass
+        
+        # Save optimizer, scheduler, and scaler states for proper resuming
+        try:
+            torch.save(optimizer.state_dict(), f"{epoch_ckpt_prefix}_optimizer.pt")
+        except Exception:
+            pass
+        if scheduler is not None:
+            try:
+                torch.save(scheduler.state_dict(), f"{epoch_ckpt_prefix}_scheduler.pt")
+            except Exception:
+                pass
+        if use_amp:
+            try:
+                torch.save(scaler.state_dict(), f"{epoch_ckpt_prefix}_scaler.pt")
+            except Exception:
+                pass
 
         print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
 
@@ -329,6 +345,21 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(ddpm_trainer.state_dict(), f"{checkpoint_dir}/best_model.pt")
+            # Also save training states for best model
+            try:
+                torch.save(optimizer.state_dict(), f"{checkpoint_dir}/best_optimizer.pt")
+            except Exception:
+                pass
+            if scheduler is not None:
+                try:
+                    torch.save(scheduler.state_dict(), f"{checkpoint_dir}/best_scheduler.pt")
+                except Exception:
+                    pass
+            if use_amp:
+                try:
+                    torch.save(scaler.state_dict(), f"{checkpoint_dir}/best_scaler.pt")
+                except Exception:
+                    pass
             print(f"New best validation loss: {best_val_loss:.4f}")
 
         # Save epoch checkpoint (every epoch)
@@ -342,6 +373,21 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
 
     # Save final model
     torch.save(ddpm_trainer.state_dict(), f"{checkpoint_dir}/final_model.pt")
+    # Also save final training states
+    try:
+        torch.save(optimizer.state_dict(), f"{checkpoint_dir}/final_optimizer.pt")
+    except Exception:
+        pass
+    if scheduler is not None:
+        try:
+            torch.save(scheduler.state_dict(), f"{checkpoint_dir}/final_scheduler.pt")
+        except Exception:
+            pass
+    if use_amp:
+        try:
+            torch.save(scaler.state_dict(), f"{checkpoint_dir}/final_scaler.pt")
+        except Exception:
+            pass
 
     # Close writers
     try:

@@ -731,6 +731,11 @@ class DDPMTrainer(LightningModuleBase):
             use_karras_sigmas=use_karras_sigmas,
         )
         scheduler.set_timesteps(num_inference_steps, device=device)
+        # Initialize begin index defensively to avoid OOB in final step
+        try:
+            scheduler.set_begin_index(0)
+        except Exception:
+            pass
         timesteps = scheduler.timesteps
 
         # Initialize x_T ~ N(0, I)
@@ -741,7 +746,9 @@ class DDPMTrainer(LightningModuleBase):
         net = self.ema_model if (use_ema and getattr(self, 'use_ema', False)) else self.model
         net.eval()
 
-        for t in timesteps:
+        # Use a safe view of timesteps to avoid step_index overflow at the end
+        safe_timesteps = timesteps[:-1] if len(timesteps) > 1 else timesteps
+        for t in safe_timesteps:
             t_batch = t.expand(B)
 
             # Predict epsilon

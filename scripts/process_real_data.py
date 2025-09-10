@@ -29,8 +29,7 @@ def normalize_to_uint8(data: np.ndarray, percentile_clip: float = 99.5) -> np.nd
     return (data_norm * 255).astype(np.uint8)
 
 
-def extract_patches(image: np.ndarray, patch_size: int = 256, stride: int = 128, 
-                   min_intensity_threshold: float = 0.1) -> list:
+def extract_patches(image: np.ndarray, patch_size: int = 256, stride: int = 128) -> list:
     """Extract patches from large images with overlap."""
     patches = []
     h, w = image.shape
@@ -39,9 +38,8 @@ def extract_patches(image: np.ndarray, patch_size: int = 256, stride: int = 128,
         for x in range(0, w - patch_size + 1, stride):
             patch = image[y:y+patch_size, x:x+patch_size]
             
-            # Skip patches that are too dark (likely background)
-            if patch.mean() > min_intensity_threshold * image.max():
-                patches.append(patch)
+            # Extract all patches without filtering (removed intensity threshold)
+            patches.append(patch)
     
     return patches
 
