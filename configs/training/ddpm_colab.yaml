@@ -1,0 +1,58 @@
+# Training hyperparameters optimized for Google Colab A100 GPU
+batch_size: 32  # Optimal for A100's 40GB memory with mixed precision
+num_workers: 2  # Reduced for Colab environment
+max_epochs: 1000  # Reduced for Colab time limits
+num_gpus: 1
+gradient_clip: 1.0
+accumulate_grad_batches: 1
+val_check_interval: 1.0
+early_stopping_patience: 5  # Increased patience for Colab
+learning_rate: 1.0e-4
+weight_decay: 1.0e-6
+use_scheduler: true  # Enable scheduler for better convergence
+num_timesteps: 1000
+beta_schedule: cosine
+use_ema: true
+supervised_x0_weight: 0.05
+
+# Conditioning toggle: when true, the model expects concatenated [x_t, WF]
+use_conditioning: true
+conditioning_type: wf
+
+# Limit iterations per epoch for Colab time constraints
+steps_per_epoch: 500  # Reduced for faster epochs
+
+# Multi-GPU / Accelerator options optimized for A100
+devices: 1
+accelerator: gpu
+precision: 16-mixed  # Use mixed precision for A100 efficiency
+distributed:
+  enabled: false
+
+# Enable full Lightning training loop
+use_lightning: true
+
+# Dynamic batch sizing for A100 optimization
+dynamic_batch_sizing: true
+dynamic_batch_safety_factor: 0.9  # Higher safety factor for A100
+persistent_workers: false  # Disable for Colab
+prefetch_factor: 2
+
+# Colab-specific optimizations
+colab_optimizations:
+  # Use diffusers scheduler for better performance
+  use_diffusers_scheduler: true
+  scheduler_type: dpm_solver  # Fast sampling scheduler
+  use_karras_sigmas: true
+  
+  # Memory optimizations
+  gradient_checkpointing: true
+  empty_cache_frequency: 100  # Clear cache every N steps
+  
+  # Checkpointing frequency
+  checkpoint_every_n_epochs: 5
+  save_samples_every_n_epochs: 10
+  
+  # Early stopping for Colab
+  early_stopping_monitor: val/loss
+  early_stopping_min_delta: 0.001
