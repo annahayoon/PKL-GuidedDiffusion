@@ -363,16 +363,17 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
                 "lr": optimizer.param_groups[0]["lr"]
             })
 
-        # Save samples and validation comparisons
-        _save_samples(epoch + 1)
-        
-        # Save validation comparison (WF | Predicted | 2P GT)
-        try:
-            # Get a validation batch for comparison
-            val_batch = next(iter(val_loader))
-            _save_validation_comparison(epoch + 1, val_batch)
-        except Exception as e:
-            print(f"Warning: Could not generate validation comparison: {e}")
+        # Save samples and validation comparisons (every 10 epochs)
+        if (epoch + 1) % 10 == 0:
+            _save_samples(epoch + 1)
+            
+            # Save validation comparison (WF | Predicted | 2P GT)
+            try:
+                # Get a validation batch for comparison
+                val_batch = next(iter(val_loader))
+                _save_validation_comparison(epoch + 1, val_batch)
+            except Exception as e:
+                print(f"Warning: Could not generate validation comparison: {e}")
         
         epoch_ckpt_prefix = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}")
         torch.save(ddpm_trainer.state_dict(), f"{epoch_ckpt_prefix}_trainer.pt")
@@ -405,30 +406,37 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
         print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
         print(f"📊 Progress: {epoch+1}/{max_epochs} epochs ({((epoch+1)/max_epochs)*100:.1f}%)")
         print(f"💾 Latest checkpoint: epoch_{epoch+1:03d}_trainer.pt")
-        print(f"🖼️ Validation images saved: validation_epoch_{epoch+1:03d}.png")
+        if (epoch + 1) % 10 == 0:
+            print(f"🖼️ Validation images saved: validation_epoch_{epoch+1:03d}.png")
         print(f"📈 TensorBoard logs: {cfg.paths.logs}")
         print("-" * 60)
 
-        # Save best model
+        # Save best model and associated states
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(ddpm_trainer.state_dict(), f"{checkpoint_dir}/best_model.pt")
-            # Also save training states for best model
+            
+            # Save best optimizer state
             try:
                 torch.save(optimizer.state_dict(), f"{checkpoint_dir}/best_optimizer.pt")
             except Exception:
                 pass
+            
+            # Save best scheduler state
             if scheduler is not None:
                 try:
                     torch.save(scheduler.state_dict(), f"{checkpoint_dir}/best_scheduler.pt")
                 except Exception:
                     pass
+            
+            # Save best scaler state
             if use_amp:
                 try:
                     torch.save(scaler.state_dict(), f"{checkpoint_dir}/best_scaler.pt")
                 except Exception:
                     pass
-            print(f"New best validation loss: {best_val_loss:.4f}")
+            
+            print(f"🏆 New best model saved! Val loss: {avg_val_loss:.4f}")
 
         # Save epoch checkpoint (every epoch)
         epoch_ckpt_prefix = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}")
