@@ -16,8 +16,8 @@ experiment:
   enable_memory_profiling: false  # Disable to save memory
 
 paths:
-  root: ${oc.env:PROJECT_ROOT,/content/PKL-DiffusionDenoising}
-  data: ${paths.root}/data
+  root: ${oc.env:PROJECT_ROOT,/content/drive/MyDrive/PKL-DiffusionDenoising}
+  data: ${paths.root}/splits
   checkpoints: ${paths.root}/checkpoints
   outputs: ${paths.root}/outputs
   logs: ${paths.root}/logs
@@ -29,7 +29,7 @@ wandb:
 
 # Override data settings for real microscopy data
 data:
-  data_dir: ${paths.root}/data/real_microscopy
+  data_dir: ${paths.data}
   image_size: 256
   min_intensity: 0
   max_intensity: 255
