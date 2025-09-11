@@ -378,8 +378,9 @@ def run_resume_training_real(cfg: DictConfig, checkpoint_path: str, start_epoch:
                 "lr": optimizer.param_groups[0]["lr"]
             })
 
-        # Save samples like ddpm.py and per-epoch weights
-        _save_samples(epoch + 1)
+        # Save samples like ddpm.py (every 20 epochs) and per-epoch weights
+        if (epoch + 1) % 20 == 0:
+            _save_samples(epoch + 1)
         epoch_ckpt_prefix = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}")
         torch.save(ddpm_trainer.state_dict(), f"{epoch_ckpt_prefix}_trainer.pt")
         try:

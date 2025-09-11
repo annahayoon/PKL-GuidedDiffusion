@@ -401,8 +401,9 @@ def run_training(cfg: DictConfig) -> DDPMTrainer:
                 writer.add_scalar("memory/reserved_mb", float(mem_snapshot.get("reserved_mb", 0.0)), epoch + 1)
                 writer.add_scalar("memory/peak_allocated_mb", float(mem_snapshot.get("peak_allocated_mb", 0.0)), epoch + 1)
 
-        # Save samples like ddpm.py
-        _save_samples(epoch + 1)
+        # Save samples like ddpm.py (every 20 epochs)
+        if (epoch + 1) % 20 == 0:
+            _save_samples(epoch + 1)
 
         # End-of-epoch checkpoints (save trainer, model, and EMA if present)
         epoch_ckpt_prefix = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}")

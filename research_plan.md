@@ -51,6 +51,7 @@
   - ✅ **Downstream task evaluation (Cellpose integration)**
   - ✅ **Robustness testing framework**
   - ✅ **Hallucination detection tests**
+  - ✅ **Patch-based denoised image reconstruction (patch_denoised_inference.py)**
 - **Testing & Validation**:
   - ✅ **End-to-end pipeline testing (784 lines of comprehensive tests)**
   - ✅ **DDIM integration tests with realistic microscopy data**
@@ -100,10 +101,10 @@
 
 ### Immediate Next Steps (High Priority)
 1. **Execute Real Data Experiments**
-   - WF/2P datasets already processed and split on disk; see `REAL_DATA_PROCESSING_SUMMARY.md` and `data/real_microscopy/{real_pairs,splits}` (9,499 pairs; 7,599/949/951)
+   - WF/2P datasets already processed and split on disk; see `REAL_DATA_PROCESSING_SUMMARY.md` and `data/real_microscopy/{real_pairs,splits}` (11,475 pairs; 9,000/1,125/1,350)
    - Run `scripts/train_real_data.py` for model training
    - Use `scripts/inference.py` and `scripts/evaluate.py` for assessment
-   - To regenerate, use `scripts/process_real_data.py` and `scripts/create_frame_based_splits.py`
+   - To regenerate, use `scripts/process_microscopy_data.py`
    - For orchestrating large experiment sweeps, use `scripts/run_all_experiments_tmux.sh` to launch parallel tmux sessions on the server
 
 2. **Generate Comprehensive Results**

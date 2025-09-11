@@ -366,8 +366,8 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
                 "lr": optimizer.param_groups[0]["lr"]
             })
 
-        # Save samples and validation comparisons (every 10 epochs)
-        if (epoch + 1) % 10 == 0:
+        # Save samples and validation comparisons (every 20 epochs)
+        if (epoch + 1) % 20 == 0:
             _save_samples(epoch + 1)
             
             # Save validation comparison (WF | Predicted | 2P GT)

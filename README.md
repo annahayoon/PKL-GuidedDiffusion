@@ -14,7 +14,7 @@ Data policy
 - Example real-microscopy processing (outputs to `data/real_microscopy/`):
 
 ```
-python3 scripts/process_real_data.py \
+python3 scripts/process_microscopy_data.py \
   --wf-path /abs/path/to/wf.tif \
   --tp-path /abs/path/to/tp_reg.tif \
   --beads-dir /abs/path/to/beads \

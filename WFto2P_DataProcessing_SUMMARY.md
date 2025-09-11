@@ -11,24 +11,24 @@ Successfully processed your real microscopy data into a format ready for PKL-gui
 - `../data_wf_tp/tp_reg.tif`: Two-photon registered data (51 frames, 2048×2048, uint16)
 
 **Processing:**
-- Extracted **9,499 patch pairs** (256×256 pixels each)
+- Extracted **11,475 patch pairs** (256×256 pixels each, 225 patches per frame)
 - Normalized to uint8 with 99.5% percentile clipping
 - Applied intensity thresholding to avoid dark background patches
-- Split into train/val/test: **7,599 / 949 / 951 pairs**
+- Split into train/val/test: **9,000 / 1,125 / 1,350 pairs**
 
 **Output Structure:**
 ```
 data/real_microscopy/
 ├── splits/
 │   ├── train/
-│   │   ├── wf/      # 7,599 WF patches
-│   │   └── 2p/      # 7,599 2P patches
+│   │   ├── wf/      # 9,000 WF patches
+│   │   └── 2p/      # 9,000 2P patches
 │   ├── val/
-│   │   ├── wf/      # 949 WF patches  
-│   │   └── 2p/      # 949 2P patches
+│   │   ├── wf/      # 1,125 WF patches  
+│   │   └── 2p/      # 1,125 2P patches
 │   └── test/
-│       ├── wf/      # 951 WF patches
-│       └── 2p/      # 951 2P patches
+│       ├── wf/      # 1,350 WF patches
+│       └── 2p/      # 1,350 2P patches
 ```
 
 ### 2. Bead Calibration Data
@@ -135,10 +135,10 @@ clean_2p, noisy_wf = train_dataset[0]
 
 ## Data Statistics
 
-- **Total WF/2P pairs**: 9,499
-- **Training pairs**: 7,599 (80%)
-- **Validation pairs**: 949 (10%)  
-- **Test pairs**: 951 (10%)
+- **Total WF/2P pairs**: 11,475
+- **Training pairs**: 9,000 (40 frames × 225 patches)
+- **Validation pairs**: 1,125 (5 frames × 225 patches)  
+- **Test pairs**: 1,350 (6 frames × 225 patches)
 - **Image size**: 256×256 pixels
 - **Data type**: uint8, normalized to [-1, 1] for training
 - **Bead z-stacks**: 241 slices each (0.1 μm steps)
@@ -158,7 +158,7 @@ The processed dataset provides a solid foundation for your 18-day sprint to ICLR
 ## Files Created
 
 ### Scripts
-- `scripts/process_real_data.py`: Data processing pipeline
+- `scripts/process_microscopy_data.py`: Data processing pipeline
 - `scripts/train_real_data.py`: Real data training script  
 - `scripts/visualize_real_data.py`: Data visualization script
 
