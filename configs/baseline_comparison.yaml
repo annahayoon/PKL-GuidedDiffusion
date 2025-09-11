@@ -1,0 +1,70 @@
+# Configuration for Full FOV Baseline Comparison
+# Richardson-Lucy vs RCAN comparison
+
+# Data paths
+data:
+  input_dir: "data/test/wf"           # Wide-field input images
+  gt_dir: "data/test/2p"              # Ground truth 2P images
+  psf_path: "data/psf/psf.tif"        # PSF file
+  mask_dir: ""                        # Optional mask directory for downstream tasks
+
+# Model paths
+model:
+  rcan_checkpoint: "checkpoints/rcan_model.pt"  # RCAN model checkpoint (optional)
+
+# Processing parameters
+processing:
+  device: "cuda"                      # Computation device
+  patch_size: 256                     # Patch size for processing
+  stride: 128                         # Stride between patches
+  max_images: null                    # Maximum number of images to process (null = all)
+
+# Richardson-Lucy parameters
+richardson_lucy:
+  iterations: 30                       # Number of RL iterations
+  clip: true                          # Clip negative values
+
+# RCAN parameters
+rcan:
+  enabled: true                       # Enable RCAN comparison
+  checkpoint_required: false          # Whether RCAN checkpoint is required
+
+# Physics parameters
+physics:
+  background_level: 0.0               # Background intensity level
+  read_noise_sigma: 0.0              # Read noise standard deviation
+
+# Output settings
+output:
+  directory: "outputs/baseline_comparison_full_fov"
+  save_individual_results: true      # Save individual image results
+  save_summary: true                 # Save summary statistics
+  create_visualizations: true        # Create comparison visualizations
+
+# Evaluation metrics
+evaluation:
+  metrics:
+    - "psnr"                         # Peak Signal-to-Noise Ratio
+    - "ssim"                         # Structural Similarity Index
+    - "frc"                          # Fourier Ring Correlation
+    - "sar"                          # Signal-to-Artifact Ratio
+    - "psf_mismatch"                 # PSF mismatch robustness
+    - "alignment_error"              # Alignment error robustness
+    - "hallucination_score"          # Hallucination detection
+  
+  downstream_tasks:
+    enabled: false                   # Enable downstream task evaluation
+    cellpose_f1: true               # Cellpose F1 score
+    hausdorff_distance: true        # Hausdorff distance
+
+# Visualization settings
+visualization:
+  percentile_clip: 99.5              # Percentile for intensity clipping
+  feather_size: null                 # Feather size for patch blending (null = auto)
+  smoothing_sigma: 0.5               # Gaussian smoothing sigma for final result
+
+# Statistical analysis
+statistics:
+  compute_significance: true         # Compute statistical significance
+  confidence_level: 0.95            # Confidence level for significance tests
+  bootstrap_samples: 1000           # Number of bootstrap samples
