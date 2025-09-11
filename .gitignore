@@ -1,5 +1,6 @@
 # Data and datasets
 data/
+data/real_microscopy/
 datasets/
 wandb/
 runs/
