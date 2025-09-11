@@ -111,4 +111,16 @@ checkpoints/
 .DS_Store
 Thumbs.db
 
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+ssh_*
+id_*
+*.rsa
+*.ed25519
+github_ssh_*
+*.ssh
+
 
