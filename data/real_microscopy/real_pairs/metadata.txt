@@ -1,7 +1,0 @@
-source_wf: ../data_wf_tp/wf.tif
-source_2p: ../data_wf_tp/tp_reg.tif
-total_frames: 51
-patch_size: 256
-total_patches: 11475
-original_shape: 2048x2048
-data_type: wf_2p_pairs
