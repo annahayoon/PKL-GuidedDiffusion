@@ -74,6 +74,7 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
         zarr_val = os.path.join(data_dir, "zarr", "val.zarr")
         train_dataset = ZarrPatchesDataset(zarr_train, transform=transform)
         val_dataset = ZarrPatchesDataset(zarr_val, transform=transform)
+        print("✅ Using Zarr format for faster data loading")
     else:
         # using real microscopy data from PNG pairs
         train_dataset = RealPairsDataset(
@@ -91,6 +92,7 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
             image_size=int(cfg.data.image_size),
             mode="val",
         )
+        print("✅ Using PNG format for data loading")
 
     print(f"Training dataset: {len(train_dataset)} pairs")
     print(f"Validation dataset: {len(val_dataset)} pairs")
