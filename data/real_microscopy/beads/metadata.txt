@@ -1,0 +1,7 @@
+source_dir: ../data_wf_tp/beads
+z_step_um: 0.1
+total_z_slices: 241
+z_range_um: 0.0 - 24.0
+xy_size: 256x256
+projection_type: max
+data_type: bead_z_stacks
