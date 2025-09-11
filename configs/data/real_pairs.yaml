@@ -1,0 +1,18 @@
+# Real microscopy data configuration
+_target_: pkl_dg.data.real_pairs.RealPairsDataset
+
+# Data paths
+data_dir: ${paths.root}/data/real_microscopy/real_pairs
+
+# Image properties
+image_size: 256
+min_intensity: 0
+max_intensity: 255
+noise_model: gaussian  # options: gaussian, poisson, poisson_gaussian
+gat:
+  alpha: 1.0
+  mu: 0.0
+  sigma: 0.0
+
+# Data splits
+split: train  # Will be overridden by train/val loaders
