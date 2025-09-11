@@ -127,4 +127,7 @@ id_*
 github_ssh_*
 *.ssh
 
+# Test enhancement files
+test_enhancement/
+
 
