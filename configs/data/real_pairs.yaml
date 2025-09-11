@@ -2,7 +2,7 @@
 _target_: pkl_dg.data.real_pairs.RealPairsDataset
 
 # Data paths
-data_dir: ${paths.root}/data/real_microscopy/real_pairs
+data_dir: ${paths.root}/data/real_microscopy
 
 # Image properties
 image_size: 256
