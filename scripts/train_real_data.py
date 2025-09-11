@@ -196,6 +196,60 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
             # Be robust to sampling failures; continue training
             pass
 
+    def _save_validation_comparison(epoch_idx: int, val_batch, num_samples: int = 3) -> None:
+        """Save validation comparison: WF input | Predicted | 2P ground truth."""
+        try:
+            ddpm_trainer.eval()
+            with torch.no_grad():
+                x_0, y_wf = val_batch
+                x_0 = x_0[:num_samples].to(device)
+                y_wf = y_wf[:num_samples].to(device)
+                
+                # Generate predictions
+                if use_conditioning and conditioning_type == "wf":
+                    # Use DDIM for faster sampling during validation
+                    predictions = ddpm_trainer.ddim_sample(
+                        num_images=num_samples, 
+                        image_shape=x_0.shape[1:], 
+                        cond=y_wf,
+                        use_ema=True
+                    )
+                else:
+                    predictions = ddpm_trainer.ddim_sample(
+                        num_images=num_samples, 
+                        image_shape=x_0.shape[1:], 
+                        use_ema=True
+                    )
+                
+                # Convert to intensity domain
+                x_0_int = transform.inverse(x_0.clamp(-1, 1)).cpu().numpy()
+                y_wf_int = transform.inverse(y_wf.clamp(-1, 1)).cpu().numpy()
+                pred_int = transform.inverse(predictions.clamp(-1, 1)).cpu().numpy()
+                
+                # Create comparison grid: WF | Predicted | 2P GT
+                H, W = x_0_int.shape[2], x_0_int.shape[3]
+                grid_h = num_samples * H
+                grid_w = 3 * W  # 3 columns: WF, Predicted, 2P GT
+                grid = np.zeros((grid_h, grid_w), dtype=np.float32)
+                
+                for i in range(num_samples):
+                    # WF input
+                    grid[i*H:(i+1)*H, 0:W] = y_wf_int[i, 0]
+                    # Predicted
+                    grid[i*H:(i+1)*H, W:2*W] = pred_int[i, 0]
+                    # 2P ground truth
+                    grid[i*H:(i+1)*H, 2*W:3*W] = x_0_int[i, 0]
+                
+                grid_img = (grid * 255.0).clip(0, 255).astype(np.uint8)
+                Image.fromarray(grid_img).save(os.path.join(samples_dir, f"validation_epoch_{epoch_idx:03d}.png"))
+                
+                # Also log to TensorBoard
+                writer.add_image(f"validation/epoch_{epoch_idx}", grid_img, epoch_idx, dataformats='HWC')
+                
+        except Exception as e:
+            print(f"Warning: Could not save validation comparison: {e}")
+            pass
+
     # Training loop
     for epoch in range(max_epochs):
         ddpm_trainer.train()
@@ -309,8 +363,17 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
                 "lr": optimizer.param_groups[0]["lr"]
             })
 
-        # Save samples like ddpm.py and per-epoch weights
+        # Save samples and validation comparisons
         _save_samples(epoch + 1)
+        
+        # Save validation comparison (WF | Predicted | 2P GT)
+        try:
+            # Get a validation batch for comparison
+            val_batch = next(iter(val_loader))
+            _save_validation_comparison(epoch + 1, val_batch)
+        except Exception as e:
+            print(f"Warning: Could not generate validation comparison: {e}")
+        
         epoch_ckpt_prefix = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}")
         torch.save(ddpm_trainer.state_dict(), f"{epoch_ckpt_prefix}_trainer.pt")
         try:
@@ -340,6 +403,11 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
                 pass
 
         print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
+        print(f"📊 Progress: {epoch+1}/{max_epochs} epochs ({((epoch+1)/max_epochs)*100:.1f}%)")
+        print(f"💾 Latest checkpoint: epoch_{epoch+1:03d}_trainer.pt")
+        print(f"🖼️ Validation images saved: validation_epoch_{epoch+1:03d}.png")
+        print(f"📈 TensorBoard logs: {cfg.paths.logs}")
+        print("-" * 60)
 
         # Save best model
         if avg_val_loss < best_val_loss:
