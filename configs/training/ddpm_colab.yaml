@@ -1,6 +1,6 @@
 # Training hyperparameters optimized for Google Colab A100 GPU
 batch_size: 32  # Optimal for A100's 40GB memory with mixed precision
-num_workers: 2  # Reduced for Colab environment
+num_workers: 4  # Optimized for Colab A100 (auto-detected in notebook)
 max_epochs: 1000  # Reduced for Colab time limits
 num_gpus: 1
 gradient_clip: 1.0
