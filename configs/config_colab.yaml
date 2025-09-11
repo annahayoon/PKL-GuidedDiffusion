@@ -17,7 +17,7 @@ experiment:
 
 paths:
   root: ${oc.env:PROJECT_ROOT,/content/drive/MyDrive/PKL-DiffusionDenoising}
-  data: ${paths.root}/splits
+  data: ${paths.root}
   checkpoints: ${paths.root}/checkpoints
   outputs: ${paths.root}/outputs
   logs: ${paths.root}/logs
