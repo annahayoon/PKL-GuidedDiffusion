@@ -25,7 +25,7 @@ paths:
 wandb:
   project: pkl-diffusion-colab
   entity: null
-  mode: online
+  mode: disabled
 
 # Override data settings for real microscopy data
 data:
