@@ -1,6 +1,6 @@
 defaults:
   - model: unet
-  - data: synthesis
+  - data: real_pairs
   - physics: microscopy
   - guidance: pkl
   - inference: default
@@ -26,6 +26,17 @@ wandb:
   project: pkl-diffusion-colab
   entity: null
   mode: online
+
+# Override data settings for real microscopy data
+data:
+  image_size: 256
+  min_intensity: 0
+  max_intensity: 255
+  noise_model: gaussian
+  gat:
+    alpha: 1.0
+    mu: 0.0
+    sigma: 0.0
 
 # Colab-specific settings
 colab:
