@@ -259,7 +259,8 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
         progress = tqdm(train_loader, desc=f"Epoch {epoch+1}/{max_epochs} [train]", leave=False)
         optimizer.zero_grad(set_to_none=True)
         
-        max_steps_this_epoch = int(getattr(cfg.training, "steps_per_epoch", 0))
+        steps_per_epoch = getattr(cfg.training, "steps_per_epoch", None)
+        max_steps_this_epoch = int(steps_per_epoch) if steps_per_epoch is not None else len(train_loader)
         for batch_idx, batch in enumerate(progress):
             x_0, y_wf = batch  # x_0 is clean 2P, y_wf is noisy WF
             x_0 = x_0.to(device, non_blocking=True)
