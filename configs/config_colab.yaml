@@ -29,6 +29,7 @@ wandb:
 
 # Override data settings for real microscopy data
 data:
+  data_dir: ${paths.root}/data/real_microscopy/real_pairs
   image_size: 256
   min_intensity: 0
   max_intensity: 255
