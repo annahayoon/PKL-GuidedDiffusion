@@ -1,12 +1,12 @@
 # Training hyperparameters for DDPM
 batch_size: 4
 num_workers: 4
-max_epochs: 5000
+max_epochs: 1000
 num_gpus: 1
 gradient_clip: 1.0
 accumulate_grad_batches: 1
 val_check_interval: 1.0
-early_stopping_patience: 2
+early_stopping_patience: 20
 learning_rate: 1.0e-4
 weight_decay: 1.0e-6
 use_scheduler: false
@@ -33,7 +33,7 @@ distributed:
   enabled: false         # true to attempt DDP via Lightning
 
 # Enable full Lightning training loop even on single device
-use_lightning: false
+use_lightning: true
 
 # Optional dynamic batch sizing controls
 dynamic_batch_sizing: false
