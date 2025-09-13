@@ -207,19 +207,18 @@ def run_training_real(cfg: DictConfig) -> DDPMTrainer:
                 x_0 = x_0[:num_samples].to(device)
                 y_wf = y_wf[:num_samples].to(device)
                 
-                # Generate predictions
+                # Generate predictions using faster scheduler-based sampling
                 if use_conditioning and conditioning_type == "wf":
-                    # Use DDIM for faster sampling during validation
-                    predictions = ddpm_trainer.ddim_sample(
-                        num_images=num_samples, 
-                        image_shape=x_0.shape[1:], 
-                        cond=y_wf,
-                        use_ema=True
+                    predictions = ddpm_trainer.sample_with_scheduler(
+                        shape=(num_samples, *x_0.shape[1:]),
+                        num_inference_steps=50,  # Fast sampling for validation
+                        use_ema=True,
+                        conditioner=y_wf
                     )
                 else:
-                    predictions = ddpm_trainer.ddim_sample(
-                        num_images=num_samples, 
-                        image_shape=x_0.shape[1:], 
+                    predictions = ddpm_trainer.sample_with_scheduler(
+                        shape=(num_samples, *x_0.shape[1:]),
+                        num_inference_steps=50,  # Fast sampling for validation
                         use_ema=True
                     )
                 
